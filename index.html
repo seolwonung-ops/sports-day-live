@@ -128,6 +128,27 @@
     .iss-info { color: #64748b; }
     .iss-ok { color: #059669; }
     .preview-table td, .preview-table th { padding: 4px 6px; vertical-align: top; }
+    /* 트리형 대진표 (한글 대진표 양식) */
+    .btree-wrap { overflow-x: auto; }
+    .btree { position: relative; min-width: 640px; height: 470px; }
+    .btree svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+    .bt-line { stroke: #334155; stroke-width: 1.4; fill: none; vector-effect: non-scaling-stroke; }
+    .bt-line.win { stroke: #dc2626; stroke-width: 4; }
+    .bt-label { position: absolute; transform: translateX(-50%); text-align: center; font-size: 0.68rem; line-height: 1.35; color: #475569; padding: 2px 3px; border-radius: 6px; white-space: nowrap; }
+    .bt-label b { font-size: 0.74rem; color: #0f172a; }
+    .bt-label .sc { font-weight: bold; color: #dc2626; font-size: 0.78rem; }
+    .bt-label .wn { color: #059669; font-weight: bold; }
+    body.is-admin .bt-label { cursor: pointer; background: rgba(37,99,235,0.07); outline: 1px dashed #93c5fd; }
+    body.is-admin .bt-label:hover { background: rgba(37,99,235,0.15); }
+    .bt-leaf { position: absolute; top: 410px; height: 58px; width: 10%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-size: 0.95rem; border: 1px dashed #94a3b8; background: #fff; box-sizing: border-box; }
+    .bt-leaf .bye { font-size: 0.62rem; color: #64748b; font-weight: normal; }
+    .bt-leaf.out { color: #94a3b8; background: #f8fafc; }
+    .bt-leaf.champ { background: #fef3c7; color: #92400e; border: 2px solid #f59e0b; }
+    .mm-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    .mm-team { flex: 1; padding: 12px; border-radius: 8px; border: 1.5px solid var(--border); background: #f8fafc; font-weight: bold; font-size: 1rem; cursor: pointer; text-align: center; }
+    .mm-team.win { background: #d1fae5; border-color: #10b981; color: #065f46; }
+    .mm-team:disabled { cursor: not-allowed; color: #94a3b8; }
+    .mm-score { width: 64px; height: 44px; text-align: center; font-size: 1.1rem; font-weight: bold; border: 1px solid var(--border); border-radius: 8px; }
   </style>
 </head>
 <body>
@@ -252,6 +273,19 @@
         <button class="btn" onclick="closeRosterModal()">취소</button>
         <button class="btn btn-primary" id="rosterSaveBtn" onclick="applyRoster()">☁️ 업로드 (심판 전체 공유)</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 경기 결과 입력 모달 (트리형 대진표에서 경기 터치) -->
+<div class="modal" id="matchModal">
+  <div class="modal-content small">
+    <h3 style="margin:0 0 4px;" id="mmTitle">경기 결과</h3>
+    <div class="hint" id="mmSched" style="margin-bottom:8px;"></div>
+    <div class="hint">이긴 팀을 누르세요 (한 번 더 누르면 취소) · 점수는 선택 입력</div>
+    <div id="mmBody"></div>
+    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+      <button class="btn btn-primary" onclick="closeModal('matchModal')">완료</button>
     </div>
   </div>
 </div>
@@ -535,6 +569,88 @@
     `;
   }
 
+  // ===================== 트리형 대진표 (아래 반 → 위로 진출) =====================
+  var BT = { H: 470, leafTop: 410, yLv: { 1: 340, 2: 245, 3: 150, 4: 55 } };
+  var MATCH_LABEL = { m1: "1경기", m2: "2경기", m3: "3경기", m4: "4경기", m5: "5경기", m6: "6경기", semi1: "준결승 1경기", semi2: "준결승 2경기", final: "결승" };
+
+  // 10팀 대진 구조: [3경기][부전1][1경기] | [2경기][부전2][4경기]
+  function bracketModel(evt, res) {
+    const tpl = evt.bracket || { m1: ["1반","2반"], m2: ["3반","4반"], m3: ["5반","6반"], m4: ["7반","8반"], b1: "9반", b2: "10반" };
+    const leafTeams = [tpl.m3[0], tpl.m3[1], tpl.b1, tpl.m1[0], tpl.m1[1], tpl.m2[0], tpl.m2[1], tpl.b2, tpl.m4[0], tpl.m4[1]];
+    const nodes = {};
+    leafTeams.forEach((t, i) => nodes["L" + i] = { leaf: true, x: (i + 0.5) / 10, y: BT.leafTop, team: t, bye: i === 2 || i === 7 });
+    const defs = [["m3", "L0", "L1", 1], ["m1", "L3", "L4", 1], ["m2", "L5", "L6", 1], ["m4", "L8", "L9", 1],
+                  ["m5", "L2", "m1", 2], ["m6", "m2", "L7", 2], ["semi1", "m3", "m5", 3], ["semi2", "m6", "m4", 3], ["final", "semi1", "semi2", 4]];
+    defs.forEach(([id, a, b, lv]) => {
+      nodes[id] = { id, kids: [a, b], x: (nodes[a].x + nodes[b].x) / 2, y: BT.yLv[lv], team: res[id] || "" };
+    });
+    const teamsOf = id => nodes[id].kids.map(k => nodes[k].team || "");
+    return { nodes, defs, teamsOf };
+  }
+
+  function renderBracketTree(evt, res) {
+    const { nodes, defs, teamsOf } = bracketModel(evt, res);
+    const sched = evt.schedule || {};
+    const losers = new Set();
+    defs.forEach(([id]) => { const w = res[id]; if (w) teamsOf(id).forEach(t => { if (t && t !== w) losers.add(t); }); });
+    const champ = res.final || "";
+    let lines = "", labels = "";
+    defs.forEach(([id]) => {
+      const n = nodes[id];
+      n.kids.forEach(k => {
+        const c = nodes[k], win = n.team && c.team && n.team === c.team ? " win" : "";
+        lines += `<path class="bt-line${win}" d="M${c.x * 1000},${c.y} V${n.y} H${n.x * 1000}"/>`;
+      });
+      const [t1, t2] = teamsOf(id);
+      const s1 = res[`${id}_s1`], s2 = res[`${id}_s2`];
+      const span = Math.abs(nodes[n.kids[1]].x - nodes[n.kids[0]].x) * 100;
+      const schedLines = String(sched[id] || "").split("/").map(s => s.trim()).filter(Boolean);
+      labels += `<div class="bt-label" style="left:${n.x * 100}%; top:${n.y + 5}px; min-width:${Math.max(span - 1, 8)}%;" onclick="openMatchModal('${evt.id}','${id}')">
+        <b>${MATCH_LABEL[id]}</b>${schedLines.map(l => `<br>${escapeHtml(l)}`).join("")}
+        ${(s1 !== undefined && s1 !== "") || (s2 !== undefined && s2 !== "") ? `<br><span class="sc">${escapeHtml(s1 || 0)} : ${escapeHtml(s2 || 0)}</span>` : ""}
+        ${n.team ? `<br><span class="wn">▲ ${escapeHtml(n.team)}</span>` : ""}
+      </div>`;
+    });
+    const leaves = Object.values(nodes).filter(n => n.leaf).map((n, i) => {
+      const cls = n.team && n.team === champ ? "champ" : (losers.has(n.team) ? "out" : "");
+      return `<div class="bt-leaf ${cls}" style="left:${i * 10}%;">${n.team === champ && champ ? "🏆 " : ""}${escapeHtml(n.team || "-")}${n.bye ? '<span class="bye">(부전승)</span>' : ""}</div>`;
+    }).join("");
+    return `<div class="btree-wrap"><div class="btree">
+      <svg viewBox="0 0 1000 ${BT.H}" preserveAspectRatio="none">${lines}</svg>${labels}${leaves}
+    </div></div>`;
+  }
+
+  // 경기 터치 → 결과 입력 창
+  var mmCur = null;
+  function openMatchModal(evtId, matchId) {
+    if (!isAdmin) return;
+    mmCur = { evtId, matchId };
+    renderMatchModal();
+    document.getElementById("matchModal").style.display = "flex";
+  }
+  function renderMatchModal() {
+    if (!mmCur) return;
+    const evt = (masterConfig.grades[currentGrade]?.events || []).find(e => e.id === mmCur.evtId);
+    if (!evt) return;
+    const key = `G${currentGrade}_${evt.id}`, res = matchData[key] || {}, id = mmCur.matchId;
+    const [t1, t2] = bracketModel(evt, res).teamsOf(id);
+    document.getElementById("mmTitle").innerText = `${evt.name} · ${MATCH_LABEL[id]}`;
+    document.getElementById("mmSched").innerText = String((evt.schedule || {})[id] || "").split("/").map(s => s.trim()).filter(Boolean).join(" · ");
+    document.getElementById("mmBody").innerHTML = [[t1, "s1"], [t2, "s2"]].map(([t, sk]) => `
+      <div class="mm-row">
+        <button class="mm-team ${t && res[id] === t ? 'win' : ''}" ${t ? "" : "disabled"} data-team="${escapeHtml(t)}" onclick="pickMatchWinner(this.dataset.team)">${t ? escapeHtml(t) + (res[id] === t ? " ✓" : "") : "(이전 경기 결과 대기)"}</button>
+        <input class="mm-score" type="number" min="0" inputmode="numeric" placeholder="점수" value="${escapeHtml(res[`${id}_${sk}`] ?? "")}" onchange="saveResultField('${key}', '${id}_${sk}', this.value)">
+      </div>`).join("");
+  }
+  function pickMatchWinner(team) {
+    if (!isAdmin || !mmCur || !team) return;
+    const key = `G${currentGrade}_${mmCur.evtId}`;
+    const cur = (matchData[key] || {})[mmCur.matchId];
+    saveResultField(key, mmCur.matchId, cur === team ? "" : team);
+    renderMatchModal();
+    renderAll();
+  }
+
   function renderEventView() {
     const gCfg = masterConfig.grades[currentGrade];
     if (!gCfg) return;
@@ -548,46 +664,13 @@
     const res = matchData[`G${currentGrade}_${evt.id}`] || {};
 
     if (evt.type === 'tournament') {
-      document.getElementById("bracketTitle").innerText = `${evt.name} 토너먼트 대진표`;
+      document.getElementById("bracketTitle").innerText = `${evt.name} 대진표`;
       const tpl = evt.bracket || { m1: ["1반","2반"], m2: ["3반","4반"], m3: ["5반","6반"], m4: ["7반","8반"], b1: "9반", b2: "10반" };
       const m1_w = res['m1'] || '', m2_w = res['m2'] || '', m3_w = res['m3'] || '', m4_w = res['m4'] || '';
       const m5_w = res['m5'] || '', m6_w = res['m6'] || '';
       const semi1_w = res['semi1'] || '', semi2_w = res['semi2'] || '';
 
-      document.getElementById("bracketArea").innerHTML = `
-        <div>
-          <div class="bracket-level-title">🏆 결승전</div>
-          <div class="bracket-row">
-            ${createMatchBoxHtml(evt.id, 'final', semi1_w || '준결1 승자', semi2_w || '준결2 승자', res, '', true)}
-          </div>
-        </div>
-        <div style="text-align:center; color:#94a3b8; font-size:0.75rem;">▲</div>
-        <div>
-          <div class="bracket-level-title">준결승 (4강)</div>
-          <div class="bracket-row">
-            ${createMatchBoxHtml(evt.id, 'semi1', m3_w || '3경기 승자', m5_w || '5경기 승자', res, '준결 1경기')}
-            ${createMatchBoxHtml(evt.id, 'semi2', m6_w || '6경기 승자', m4_w || '4경기 승자', res, '준결 2경기')}
-          </div>
-        </div>
-        <div style="text-align:center; color:#94a3b8; font-size:0.75rem;">▲</div>
-        <div>
-          <div class="bracket-level-title">8강전 (부전승 합류)</div>
-          <div class="bracket-row">
-            ${createMatchBoxHtml(evt.id, 'm5', `${tpl.b1} (부전)`, m1_w || '1경기 승자', res, '5경기')}
-            ${createMatchBoxHtml(evt.id, 'm6', m2_w || '2경기 승자', `${tpl.b2} (부전)`, res, '6경기')}
-          </div>
-        </div>
-        <div style="text-align:center; color:#94a3b8; font-size:0.75rem;">▲</div>
-        <div>
-          <div class="bracket-level-title">1회전 (예선)</div>
-          <div class="bracket-row" style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px;">
-            ${createMatchBoxHtml(evt.id, 'm3', tpl.m3[0], tpl.m3[1], res, '3경기')}
-            ${createMatchBoxHtml(evt.id, 'm1', tpl.m1[0], tpl.m1[1], res, '1경기')}
-            ${createMatchBoxHtml(evt.id, 'm2', tpl.m2[0], tpl.m2[1], res, '2경기')}
-            ${createMatchBoxHtml(evt.id, 'm4', tpl.m4[0], tpl.m4[1], res, '4경기')}
-          </div>
-        </div>
-      `;
+      document.getElementById("bracketArea").innerHTML = renderBracketTree(evt, res);
     } else if (evt.type === 'jumprope') {
       document.getElementById("jumpropeTitle").innerText = `${evt.name} - 기록 측정`;
       document.getElementById("jumpropeInputs").innerHTML = gCfg.teams.map(t => `
@@ -1210,6 +1293,10 @@
             <label>8강 부전승1:</label><input type="text" class="cfg-b-b1" style="width:50px;" value="${evt.bracket?.b1 || '9반'}">
             <label style="margin-left:8px;">8강 부전승2:</label><input type="text" class="cfg-b-b2" style="width:50px;" value="${evt.bracket?.b2 || '10반'}">
           </div>
+          <div style="font-size:0.75rem; font-weight:bold; margin:8px 0 4px;">경기 일정 (날짜 / 장소 / 시간, '/'로 구분 → 대진표에 줄바꿈 표시):</div>
+          <div class="config-row">
+            ${Object.keys(MATCH_LABEL).map(mid => `<label>${MATCH_LABEL[mid]}:</label><input type="text" class="cfg-s-${mid}" style="width:150px;" placeholder="5월 19일 / 1경기장 / 12:25" value="${escapeHtml((evt.schedule || {})[mid] || '')}">`).join('')}
+          </div>
         </div>
       </div>
     `).join('');
@@ -1253,6 +1340,8 @@
           m3: [q(".cfg-b-m3-1"), q(".cfg-b-m3-2")], m4: [q(".cfg-b-m4-1"), q(".cfg-b-m4-2")],
           b1: q(".cfg-b-b1"), b2: q(".cfg-b-b2")
         };
+        evtObj.schedule = {};
+        Object.keys(MATCH_LABEL).forEach(mid => { const v = box.querySelector(".cfg-s-" + mid)?.value.trim(); if (v) evtObj.schedule[mid] = v; });
       }
       newEvents.push(evtObj);
     });
