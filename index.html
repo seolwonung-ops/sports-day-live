@@ -286,7 +286,7 @@
   <div class="modal-content small">
     <h3 style="margin:0 0 4px;" id="mmTitle">경기 결과</h3>
     <div class="hint" id="mmSched" style="margin-bottom:8px;"></div>
-    <div class="hint">이긴 팀을 누르세요 (한 번 더 누르면 취소) · 점수는 선택 입력</div>
+    <div class="hint" id="mmHint">이긴 팀을 누르세요 (한 번 더 누르면 취소) · 점수는 선택 입력</div>
     <div id="mmBody"></div>
     <div id="mmSig" class="sig-box"></div>
     <div style="display:flex; justify-content:flex-end; margin-top:12px;">
@@ -553,10 +553,12 @@
   function handleRaceChange(evtId, rankField, team) {
     if (!isAdmin) return;
     saveResultField(`G${currentGrade}_${evtId}`, rankField, team);
+    invalidateSig(evtId);
   }
   function handleJumpropeChange(team, count) {
     if (!isAdmin) return;
     saveResultField(`G${currentGrade}_jumprope`, team, parseInt(count, 10) || 0);
+    invalidateSig("jumprope");
   }
 
   // ===================== 대진표·종목 화면 =====================
@@ -644,6 +646,14 @@
     const evt = (masterConfig.grades[currentGrade]?.events || []).find(e => e.id === mmCur.evtId);
     if (!evt) return;
     const key = `G${currentGrade}_${evt.id}`, res = matchData[key] || {}, id = mmCur.matchId;
+    document.getElementById("mmHint").style.display = evt.type === "tournament" ? "" : "none";
+    if (evt.type !== "tournament") {
+      document.getElementById("mmTitle").innerText = `${evt.name} · 결과 확정 서명`;
+      document.getElementById("mmSched").innerText = "아래 결과가 맞는지 확인한 뒤 서명하세요.";
+      document.getElementById("mmBody").innerHTML = `<div class="rank-summary-box" style="padding:8px;">${resultSummaryText(evt, res, id).split(" · ").map(l => `<div class="rank-item top8" style="margin-bottom:4px;">${escapeHtml(l)}</div>`).join("")}</div>`;
+      renderSigBox();
+      return;
+    }
     const [t1, t2] = bracketModel(evt, res).teamsOf(id);
     document.getElementById("mmTitle").innerText = `${evt.name} · ${MATCH_LABEL[id]}`;
     document.getElementById("mmSched").innerText = String((evt.schedule || {})[id] || "").split("/").map(s => s.trim()).filter(Boolean).join(" · ");
@@ -675,6 +685,31 @@
   // ===================== ✍️ 심판 서명 (심판만 열람: signatures 컬렉션) =====================
   var sigCache = {}, mmResign = false, sigPad = { drawn: false };
   function sigDocId(evtId, id) { return `G${currentGrade}_${evtId}_${id}`; }
+  function sigEvt() { return mmCur ? (masterConfig.grades[currentGrade]?.events || []).find(e => e.id === mmCur.evtId) : null; }
+  // 서명 당시 결과와 지금 결과를 비교하기 위한 문자열
+  function resultSnap(evt, res, id) {
+    if (!evt || evt.type === "tournament") return res[id] || "";
+    if (evt.type === "race") return [1, 2, 3, 4].map(i => res[`rank${i}`] || "").join("|");
+    return (masterConfig.grades[currentGrade]?.teams || []).map(t => `${t}:${res[t] || 0}`).join("|");
+  }
+  function resultReady(evt, res, id) {
+    if (!evt || evt.type === "tournament") return !!res[id];
+    if (evt.type === "race") return !!res.rank1;
+    return (masterConfig.grades[currentGrade]?.teams || []).some(t => (res[t] || 0) > 0);
+  }
+  function resultSummaryText(evt, res, id) {
+    if (!evt || evt.type === "tournament") {
+      const sc = (res[`${id}_s1`] ?? "") !== "" || (res[`${id}_s2`] ?? "") !== "" ? ` (${res[`${id}_s1`] || 0} : ${res[`${id}_s2`] || 0})` : "";
+      return `승: ${res[id] || "-"}${sc}`;
+    }
+    if (evt.type === "race") return [1, 2, 3, 4].map(i => `${i}위 ${res[`rank${i}`] || "미정"}`).join(" · ");
+    return (masterConfig.grades[currentGrade]?.teams || []).map(t => ({ t, c: res[t] || 0 })).sort((a, b) => b.c - a.c)
+      .map((x, i) => `${i + 1}위 ${x.t} (${x.c})`).join(" · ");
+  }
+  function invalidateSig(evtId, id = "result") {
+    const key = `G${currentGrade}_${evtId}`;
+    if ((matchData[key] || {})[`${id}_sig`]) saveResultField(key, `${id}_sig`, false);
+  }
   async function loadSig(evtId, id) {
     const k = sigDocId(evtId, id);
     if (!(k in sigCache)) sigCache[k] = undefined;
@@ -689,16 +724,16 @@
     const res = matchData[`G${currentGrade}_${mmCur.evtId}`] || {};
     if (sig === undefined) { box.innerHTML = '<div class="hint">서명 불러오는 중…</div>'; return; }
     if (sig && !mmResign) {
-      const valid = !!res[`${id}_sig`] && sig.winner === (res[id] || "");
+      const valid = !!res[`${id}_sig`] && (sig.snap !== undefined ? sig.snap === resultSnap(sigEvt(), res, id) : sig.winner === (res[id] || ""));
       const okImg = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/=]+$/.test(sig.img || "");
       const when = sig.at && sig.at.toDate ? sig.at.toDate().toLocaleString("ko-KR") : "";
       box.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">✍️ 심판 서명 ${valid ? '<span class="iss-ok">(유효)</span>' : '<span class="iss-err">(서명 후 결과가 바뀜 → 다시 서명 필요)</span>'}</div>
         ${okImg ? `<img class="sig-img" src="${sig.img}" alt="심판 서명">` : ""}
-        <div class="hint" style="margin-top:4px;">${escapeHtml(sig.name)} · 승: ${escapeHtml(sig.winner)}${(sig.s1 !== "" || sig.s2 !== "") ? ` (${escapeHtml(sig.s1 || 0)} : ${escapeHtml(sig.s2 || 0)})` : ""}${when ? " · " + escapeHtml(when) : ""}</div>
+        <div class="hint" style="margin-top:4px;">${escapeHtml(sig.name)}${when ? " · " + escapeHtml(when) : ""}<br>${escapeHtml(sig.summary || ("승: " + (sig.winner || "")))}</div>
         <button class="btn" style="margin-top:6px;" onclick="mmResign = true; renderSigBox();">다시 서명</button>`;
       return;
     }
-    box.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">✍️ 심판 서명 <span class="hint">(이긴 팀 선택 후 서명)</span></div>
+    box.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">✍️ 심판 서명 <span class="hint">(${sigEvt()?.type === "tournament" ? "이긴 팀 선택 후 서명" : "결과 입력 후 서명"})</span></div>
       <input class="login-field" id="sigName" placeholder="심판 이름" style="margin:0 0 6px;">
       <canvas class="sig-canvas" id="sigCanvas"></canvas>
       <div style="display:flex; gap:6px; margin-top:6px; justify-content:flex-end;">
@@ -726,13 +761,15 @@
     if (!isAdmin || !mmCur) return;
     const id = mmCur.matchId, evtId = mmCur.evtId, key = `G${currentGrade}_${evtId}`, res = matchData[key] || {};
     const name = (document.getElementById("sigName")?.value || "").trim();
-    if (!res[id]) { alert("먼저 이긴 팀을 선택하세요."); return; }
+    const evtS = sigEvt();
+    if (!resultReady(evtS, res, id)) { alert(evtS?.type === "tournament" ? "먼저 이긴 팀을 선택하세요." : "먼저 결과(순위/기록)를 입력하세요."); return; }
     if (!name) { alert("심판 이름을 입력하세요."); return; }
     if (!sigPad.drawn) { alert("서명란에 서명해 주세요."); return; }
     const c = document.getElementById("sigCanvas"), t = document.createElement("canvas");
     t.width = 400; t.height = 130;
     const tx = t.getContext("2d"); tx.fillStyle = "#fff"; tx.fillRect(0, 0, 400, 130); tx.drawImage(c, 0, 0, 400, 130);
-    const data = { name, img: t.toDataURL("image/jpeg", 0.7), winner: res[id], s1: res[`${id}_s1`] ?? "", s2: res[`${id}_s2`] ?? "",
+    const data = { name, img: t.toDataURL("image/jpeg", 0.7), winner: res[id] || "", s1: res[`${id}_s1`] ?? "", s2: res[`${id}_s2`] ?? "",
+                   snap: resultSnap(evtS, res, id), summary: resultSummaryText(evtS, res, id),
                    at: firebase.firestore.FieldValue.serverTimestamp(), by: currentUser?.email || "" };
     const btn = document.getElementById("sigSaveBtn"); if (btn) btn.disabled = true;
     try {
@@ -786,6 +823,11 @@
     }
 
     renderEventRankSummary(evt, res, gCfg);
+    if (evt.type !== "tournament") {
+      const signed = !!res.result_sig;
+      document.getElementById("eventRankSummaryList").insertAdjacentHTML("beforeend",
+        `<div class="rank-item ${signed ? "gold" : "etc"}" style="margin-top:10px;"><span>${signed ? "✍️ 심판 확정 서명 완료" : "✍️ 심판 서명 전"}</span>${isAdmin ? `<button class="btn btn-ok" style="padding:3px 8px; font-size:0.75rem;" onclick="openMatchModal('${evt.id}','result')">${signed ? "서명 보기" : "결과 확정 서명"}</button>` : ""}</div>`);
+    }
   }
 
   function renderEventRankSummary(evt, res, gCfg) {
