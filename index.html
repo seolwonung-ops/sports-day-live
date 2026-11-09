@@ -149,6 +149,10 @@
     .mm-team.win { background: #d1fae5; border-color: #10b981; color: #065f46; }
     .mm-team:disabled { cursor: not-allowed; color: #94a3b8; }
     .mm-score { width: 64px; height: 44px; text-align: center; font-size: 1.1rem; font-weight: bold; border: 1px solid var(--border); border-radius: 8px; }
+    .sig-box { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
+    .sig-canvas { width: 100%; height: 130px; border: 1.5px dashed #94a3b8; border-radius: 8px; background: #fff; touch-action: none; display: block; }
+    .sig-img { max-width: 100%; height: 110px; border: 1px solid var(--border); border-radius: 8px; background: #fff; display: block; }
+    .bt-label .sg { color: #7c3aed; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -284,6 +288,7 @@
     <div class="hint" id="mmSched" style="margin-bottom:8px;"></div>
     <div class="hint">이긴 팀을 누르세요 (한 번 더 누르면 취소) · 점수는 선택 입력</div>
     <div id="mmBody"></div>
+    <div id="mmSig" class="sig-box"></div>
     <div style="display:flex; justify-content:flex-end; margin-top:12px;">
       <button class="btn btn-primary" onclick="closeModal('matchModal')">완료</button>
     </div>
@@ -497,10 +502,15 @@
 
   function resetAllData() {
     if (!isAdmin) return;
-    if (confirm("⚠️ 모든 경기 결과와 점수 기록을 초기화하시겠습니까? (명단·출석은 유지)")) {
+    if (confirm("⚠️ 모든 경기 결과·점수·심판 서명을 초기화하시겠습니까? (명단·출석은 유지)")) {
       if (prompt("초기화를 진행하려면 '초기화'를 입력하세요:") === "초기화") {
         db.collection("matches").doc("allResults").set({})
-          .then(() => alert("기록이 성공적으로 초기화되었습니다.")).catch(onWriteError);
+          .then(async () => {
+            const snap = await db.collection("signatures").get();
+            await Promise.all(snap.docs.map(d => d.ref.delete()));
+            sigCache = {};
+            alert("기록(경기 결과·심판 서명)이 성공적으로 초기화되었습니다.");
+          }).catch(onWriteError);
       }
     }
   }
@@ -608,7 +618,7 @@
       labels += `<div class="bt-label" style="left:${n.x * 100}%; top:${n.y + 5}px; min-width:${Math.max(span - 1, 8)}%;" onclick="openMatchModal('${evt.id}','${id}')">
         <b>${MATCH_LABEL[id]}</b>${schedLines.map(l => `<br>${escapeHtml(l)}`).join("")}
         ${(s1 !== undefined && s1 !== "") || (s2 !== undefined && s2 !== "") ? `<br><span class="sc">${escapeHtml(s1 || 0)} : ${escapeHtml(s2 || 0)}</span>` : ""}
-        ${n.team ? `<br><span class="wn">▲ ${escapeHtml(n.team)}</span>` : ""}
+        ${n.team ? `<br><span class="wn">▲ ${escapeHtml(n.team)}</span>` : ""}${res[`${id}_sig`] ? `<br><span class="sg">✍️ 서명</span>` : ""}
       </div>`;
     });
     const leaves = Object.values(nodes).filter(n => n.leaf).map((n, i) => {
@@ -624,9 +634,10 @@
   var mmCur = null;
   function openMatchModal(evtId, matchId) {
     if (!isAdmin) return;
-    mmCur = { evtId, matchId };
-    renderMatchModal();
+    mmCur = { evtId, matchId }; mmResign = false;
     document.getElementById("matchModal").style.display = "flex";
+    renderMatchModal();
+    loadSig(evtId, matchId);
   }
   function renderMatchModal() {
     if (!mmCur) return;
@@ -639,16 +650,98 @@
     document.getElementById("mmBody").innerHTML = [[t1, "s1"], [t2, "s2"]].map(([t, sk]) => `
       <div class="mm-row">
         <button class="mm-team ${t && res[id] === t ? 'win' : ''}" ${t ? "" : "disabled"} data-team="${escapeHtml(t)}" onclick="pickMatchWinner(this.dataset.team)">${t ? escapeHtml(t) + (res[id] === t ? " ✓" : "") : "(이전 경기 결과 대기)"}</button>
-        <input class="mm-score" type="number" min="0" inputmode="numeric" placeholder="점수" value="${escapeHtml(res[`${id}_${sk}`] ?? "")}" onchange="saveResultField('${key}', '${id}_${sk}', this.value)">
+        <input class="mm-score" type="number" min="0" inputmode="numeric" placeholder="점수" value="${escapeHtml(res[`${id}_${sk}`] ?? "")}" onchange="mmScore('${sk}', this.value)">
       </div>`).join("");
+    renderSigBox();
   }
   function pickMatchWinner(team) {
     if (!isAdmin || !mmCur || !team) return;
     const key = `G${currentGrade}_${mmCur.evtId}`;
     const cur = (matchData[key] || {})[mmCur.matchId];
     saveResultField(key, mmCur.matchId, cur === team ? "" : team);
+    if ((matchData[key] || {})[`${mmCur.matchId}_sig`]) saveResultField(key, `${mmCur.matchId}_sig`, false);   // 서명 후 결과 변경 → 재서명 필요
     renderMatchModal();
     renderAll();
+  }
+  function mmScore(sk, v) {
+    if (!isAdmin || !mmCur) return;
+    const key = `G${currentGrade}_${mmCur.evtId}`, id = mmCur.matchId;
+    saveResultField(key, `${id}_${sk}`, v);
+    if ((matchData[key] || {})[`${id}_sig`]) saveResultField(key, `${id}_sig`, false);
+    renderSigBox();
+    renderAll();
+  }
+
+  // ===================== ✍️ 심판 서명 (심판만 열람: signatures 컬렉션) =====================
+  var sigCache = {}, mmResign = false, sigPad = { drawn: false };
+  function sigDocId(evtId, id) { return `G${currentGrade}_${evtId}_${id}`; }
+  async function loadSig(evtId, id) {
+    const k = sigDocId(evtId, id);
+    if (!(k in sigCache)) sigCache[k] = undefined;
+    try { const d = await db.collection("signatures").doc(k).get(); sigCache[k] = d.exists ? d.data() : null; }
+    catch (e) { console.warn("서명 불러오기 실패", e); sigCache[k] = null; }
+    if (mmCur && sigDocId(mmCur.evtId, mmCur.matchId) === k) renderSigBox();
+  }
+  function renderSigBox() {
+    const box = document.getElementById("mmSig");
+    if (!mmCur || !box) return;
+    const k = sigDocId(mmCur.evtId, mmCur.matchId), sig = sigCache[k], id = mmCur.matchId;
+    const res = matchData[`G${currentGrade}_${mmCur.evtId}`] || {};
+    if (sig === undefined) { box.innerHTML = '<div class="hint">서명 불러오는 중…</div>'; return; }
+    if (sig && !mmResign) {
+      const valid = !!res[`${id}_sig`] && sig.winner === (res[id] || "");
+      const okImg = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/=]+$/.test(sig.img || "");
+      const when = sig.at && sig.at.toDate ? sig.at.toDate().toLocaleString("ko-KR") : "";
+      box.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">✍️ 심판 서명 ${valid ? '<span class="iss-ok">(유효)</span>' : '<span class="iss-err">(서명 후 결과가 바뀜 → 다시 서명 필요)</span>'}</div>
+        ${okImg ? `<img class="sig-img" src="${sig.img}" alt="심판 서명">` : ""}
+        <div class="hint" style="margin-top:4px;">${escapeHtml(sig.name)} · 승: ${escapeHtml(sig.winner)}${(sig.s1 !== "" || sig.s2 !== "") ? ` (${escapeHtml(sig.s1 || 0)} : ${escapeHtml(sig.s2 || 0)})` : ""}${when ? " · " + escapeHtml(when) : ""}</div>
+        <button class="btn" style="margin-top:6px;" onclick="mmResign = true; renderSigBox();">다시 서명</button>`;
+      return;
+    }
+    box.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">✍️ 심판 서명 <span class="hint">(이긴 팀 선택 후 서명)</span></div>
+      <input class="login-field" id="sigName" placeholder="심판 이름" style="margin:0 0 6px;">
+      <canvas class="sig-canvas" id="sigCanvas"></canvas>
+      <div style="display:flex; gap:6px; margin-top:6px; justify-content:flex-end;">
+        ${sig ? '<button class="btn" onclick="mmResign = false; renderSigBox();">취소</button>' : ""}
+        <button class="btn" onclick="initSigPad()">지우기</button>
+        <button class="btn btn-ok" id="sigSaveBtn" onclick="saveSignature()">서명 저장</button>
+      </div>`;
+    initSigPad();
+  }
+  function initSigPad() {
+    const c = document.getElementById("sigCanvas"); if (!c) return;
+    const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const w = r.width || 300, h = r.height || 130;
+    c.width = w * dpr; c.height = h * dpr;
+    const ctx = c.getContext && c.getContext("2d"); sigPad = { drawn: false };
+    if (!ctx) return;
+    ctx.scale(dpr, dpr); ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#111827";
+    let drawing = false;
+    const pos = e => { const b = c.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+    c.onpointerdown = e => { drawing = true; try { c.setPointerCapture(e.pointerId); } catch (_) {} const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
+    c.onpointermove = e => { if (!drawing) return; const [x, y] = pos(e); ctx.lineTo(x, y); ctx.stroke(); sigPad.drawn = true; };
+    c.onpointerup = c.onpointercancel = c.onpointerleave = () => { drawing = false; };
+  }
+  async function saveSignature() {
+    if (!isAdmin || !mmCur) return;
+    const id = mmCur.matchId, evtId = mmCur.evtId, key = `G${currentGrade}_${evtId}`, res = matchData[key] || {};
+    const name = (document.getElementById("sigName")?.value || "").trim();
+    if (!res[id]) { alert("먼저 이긴 팀을 선택하세요."); return; }
+    if (!name) { alert("심판 이름을 입력하세요."); return; }
+    if (!sigPad.drawn) { alert("서명란에 서명해 주세요."); return; }
+    const c = document.getElementById("sigCanvas"), t = document.createElement("canvas");
+    t.width = 400; t.height = 130;
+    const tx = t.getContext("2d"); tx.fillStyle = "#fff"; tx.fillRect(0, 0, 400, 130); tx.drawImage(c, 0, 0, 400, 130);
+    const data = { name, img: t.toDataURL("image/jpeg", 0.7), winner: res[id], s1: res[`${id}_s1`] ?? "", s2: res[`${id}_s2`] ?? "",
+                   at: firebase.firestore.FieldValue.serverTimestamp(), by: currentUser?.email || "" };
+    const btn = document.getElementById("sigSaveBtn"); if (btn) btn.disabled = true;
+    try {
+      await db.collection("signatures").doc(sigDocId(evtId, id)).set(data);
+      saveResultField(key, `${id}_sig`, true);
+      mmResign = false;
+      await loadSig(evtId, id);
+      renderAll();
+    } catch (e) { onWriteError(e); if (btn) btn.disabled = false; }
   }
 
   function renderEventView() {
