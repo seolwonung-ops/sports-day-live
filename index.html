@@ -205,10 +205,11 @@
 <div class="modal" id="loginModal">
   <div class="modal-content small">
     <h3 style="margin:0 0 12px;">🔒 심판 로그인</h3>
-    <label class="hint">이메일</label>
-    <input class="login-field" id="loginEmail" type="email" autocomplete="username">
-    <label class="hint">비밀번호</label>
+    <label class="hint">심판 비밀번호</label>
     <input class="login-field" id="loginPw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()">
+    <details style="margin-bottom:8px;"><summary class="hint" style="cursor:pointer;">관리자 계정으로 로그인 (이메일)</summary>
+      <input class="login-field" id="loginEmail" type="email" autocomplete="username" placeholder="비워두면 공용 심판 계정으로 로그인">
+    </details>
     <div class="login-err" id="loginErr"></div>
     <div style="display:flex; justify-content:flex-end; gap:8px;">
       <button class="btn" onclick="closeModal('loginModal')">취소</button>
@@ -295,6 +296,7 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   const auth = firebase.auth();
+  const REFEREE_EMAIL = "seolwonung+referee@gmail.com";   // 공용 심판 계정 (로그인 창에서는 비밀번호만 입력)
 
   // ※ 비밀번호(PIN)는 더 이상 코드에 없음. 심판 권한은 Firebase 보안 규칙(firestore.rules)의 이메일 목록으로 결정.
   let isAdmin = false;
@@ -422,7 +424,7 @@
     badge.className = "mode-badge " + (on ? "badge-admin" : "badge-student");
     badge.innerText = on ? "심판/관리자 모드" : "학생 모드";
     document.getElementById("modeDesc").innerText = on
-      ? `✏️ ${currentUser?.email || ''} · 승자 터치, 스코어 입력, 인원 체크 가능`
+      ? `✏️ ${currentUser?.email === REFEREE_EMAIL ? '공용 심판' : (currentUser?.email || '')} · 승자 터치, 스코어 입력, 인원 체크 가능`
       : "👀 학생 관람 모드 (실시간 동기화)";
     document.getElementById("authBtn").innerText = on ? "로그아웃" : "🔒 심판 로그인";
     if (!on) { currentUser = null; unsubscribePrivate(); ['rosterModal','configModal'].forEach(closeModal); }
@@ -434,21 +436,21 @@
     document.getElementById("loginErr").innerText = "";
     document.getElementById("loginPw").value = "";
     document.getElementById("loginModal").style.display = "flex";
-    setTimeout(() => document.getElementById("loginEmail").focus(), 50);
+    setTimeout(() => document.getElementById("loginPw").focus(), 50);
   }
 
   async function doLogin() {
-    const email = document.getElementById("loginEmail").value.trim();
+    const email = document.getElementById("loginEmail").value.trim() || REFEREE_EMAIL;
     const pw = document.getElementById("loginPw").value;
     const err = document.getElementById("loginErr"), btn = document.getElementById("loginSubmit");
-    if (!email || !pw) { err.innerText = "이메일과 비밀번호를 입력하세요."; return; }
+    if (!email || !pw) { err.innerText = "비밀번호를 입력하세요."; return; }
     btn.disabled = true; err.innerText = "";
     try {
       await auth.signInWithEmailAndPassword(email, pw);
       closeModal("loginModal");
     } catch (e) {
       const msg = {
-        "auth/invalid-credential": "이메일 또는 비밀번호가 틀렸습니다.",
+        "auth/invalid-credential": "비밀번호가 틀렸습니다.",
         "auth/wrong-password": "이메일 또는 비밀번호가 틀렸습니다.",
         "auth/user-not-found": "이메일 또는 비밀번호가 틀렸습니다.",
         "auth/invalid-email": "이메일 형식이 올바르지 않습니다.",
