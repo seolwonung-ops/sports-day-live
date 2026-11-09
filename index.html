@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>교내 어울림 체육한마당 Live</title>
+
+  <!-- Firebase SDK 9.23.0 (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <!-- SheetJS 0.20.3 (엑셀 명단 업로드용) -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #1e40af;
+      --accent: #2563eb;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --winner: #10b981;
+      --border: #cbd5e1;
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { margin: 0; padding: 12px; background: var(--bg); color: #0f172a; }
+
+    .header { background: var(--card); padding: 14px 18px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.06); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .mode-badge { padding: 5px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; }
+    .badge-student { background: #e0f2fe; color: #0369a1; }
+    .badge-admin { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+
+    .btn { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); font-weight: bold; cursor: pointer; background: #fff; }
+    .btn-primary { background: var(--primary); color: #fff; border: none; }
+    .btn-config { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .btn-danger { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; }
+    .btn-ok { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+    .btn:disabled { opacity: .5; cursor: wait; }
+
+    .nav-tabs { display: flex; gap: 6px; margin: 12px 0; }
+    .nav-tabs button { padding: 8px 16px; border: 1px solid var(--border); background: #fff; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 0.95rem; }
+    .nav-tabs button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    .event-tabs { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px; }
+    .event-tabs button { padding: 6px 12px; border: 1px solid var(--border); background: #fff; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .event-tabs button.active { background: #334155; color: #fff; border-color: #334155; }
+    .event-tabs button.done { background: #ecfdf5; color: #065f46; border-color: #10b981; }
+    .event-tabs button.done.active { background: #065f46; color: #fff; }
+
+    .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+
+    .event-main-grid { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; }
+    @media (max-width: 950px) { .event-main-grid { grid-template-columns: 1fr; } }
+
+    .vertical-bracket { display: flex; flex-direction: column; gap: 12px; background: #f8fafc; padding: 16px; border-radius: 10px; border: 1px solid var(--border); overflow-x: auto; }
+    .bracket-row { display: flex; justify-content: space-around; gap: 8px; align-items: center; }
+    .bracket-level-title { font-size: 0.75rem; font-weight: bold; color: #64748b; text-align: center; margin-bottom: 4px; }
+
+    .match-card { background: #fff; border: 1.5px solid var(--border); border-radius: 8px; padding: 6px; min-width: 120px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+    .match-card.final-card { border-color: #f59e0b; background: #fffbeb; min-width: 150px; }
+
+    .team-row { display: flex; align-items: center; gap: 4px; margin: 3px 0; }
+    .team-btn { flex: 1; padding: 5px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; background: #f8fafc; border: 1px solid #e2e8f0; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .team-btn.win { background: #d1fae5 !important; border-color: var(--winner) !important; color: #065f46 !important; font-weight: bold; }
+
+    .score-input { width: 38px; height: 26px; text-align: center; font-size: 0.8rem; font-weight: bold; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+
+    body.is-admin .team-btn { cursor: pointer; }
+    body.is-admin .team-btn:hover { background: #e2e8f0; }
+    body.is-admin .team-btn:active { transform: scale(0.96); }
+    body:not(.is-admin) .team-btn { cursor: default; }
+    body:not(.is-admin) .score-input { background: #f1f5f9; color: #334155; border: none; }
+    body:not(.is-admin) .admin-only { display: none !important; }
+
+    .rank-summary-box { background: #ffffff; border: 1.5px solid var(--border); border-radius: 10px; padding: 14px; }
+    .rank-summary-box h4 { margin: 0 0 10px 0; font-size: 0.95rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 6px; }
+    .rank-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; margin-bottom: 6px; border-radius: 6px; font-size: 0.82rem; }
+    .rank-item.gold { background: #fef9c3; color: #854d0e; font-weight: bold; border-left: 4px solid #eab308; }
+    .rank-item.silver { background: #f1f5f9; color: #334155; font-weight: bold; border-left: 4px solid #94a3b8; }
+    .rank-item.bronze { background: #ffedd5; color: #9a3412; font-weight: bold; border-left: 4px solid #f97316; }
+    .rank-item.top8 { background: #f8fafc; color: #475569; border-left: 4px solid #cbd5e1; }
+    .rank-item.etc { background: #fafafa; color: #94a3b8; }
+
+    .table-wrapper { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: center; font-size: 0.8rem; min-width: 600px; }
+    th, td { padding: 6px 4px; border: 1px solid var(--border); }
+    th { background: #f1f5f9; color: #475569; }
+    .rank-1 { background: #fef08a !important; font-weight: bold; color: #854d0e; }
+    .rank-2 { background: #f1f5f9 !important; font-weight: bold; }
+    .rank-3 { background: #fed7aa !important; font-weight: bold; color: #9a3412; }
+
+    .inputs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-top: 8px; }
+    .input-card { background: #f8fafc; padding: 8px; border-radius: 6px; border: 1px solid var(--border); text-align: center; font-size: 0.82rem; }
+    .input-card input, .input-card select { width: 100%; padding: 4px; margin-top: 4px; border: 1px solid var(--border); border-radius: 4px; text-align: center; font-weight: bold; }
+
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+    .modal-content { background: #fff; border-radius: 12px; padding: 20px; width: 95%; max-width: 750px; max-height: 90vh; overflow-y: auto; }
+    .modal-content.small { max-width: 360px; }
+    .config-event-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .config-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: center; }
+    .config-row label { font-size: 0.8rem; font-weight: bold; }
+    .config-row input, .config-row select { padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.8rem; }
+
+    /* 로그인 */
+    .login-field { width: 100%; padding: 9px; margin: 4px 0 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; }
+    .login-err { color: #dc2626; font-size: 0.8rem; min-height: 1em; margin-bottom: 8px; }
+
+    /* 명단 업로드 */
+    .hint { font-size: 0.75rem; color: #64748b; }
+    #rosterText { width: 100%; height: 200px; font-family: monospace; font-size: 0.8rem; padding: 6px; border: 1px solid var(--border); border-radius: 6px; }
+    .preview-table { min-width: 0; font-size: 0.75rem; margin-top: 6px; }
+
+    /* 인원 체크 */
+    .att-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .att-count { font-size: 1.05rem; font-weight: bold; }
+    .att-count.complete { color: #059669; }
+    .att-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: 6px; }
+    .att-btn { padding: 10px 4px; border: 1.5px solid var(--border); border-radius: 8px; background: #fff; font-weight: bold; font-size: 0.92rem; cursor: pointer; text-align: center; user-select: none; }
+    .att-btn .no { display: block; font-size: 0.7rem; color: #64748b; font-weight: normal; }
+    .att-btn.on { background: #d1fae5; border-color: #10b981; color: #065f46; }
+    .att-btn.on::before { content: "✓ "; }
+    .att-btn:active { transform: scale(0.96); }
+    .att-missing { margin-top: 10px; padding: 8px 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; font-size: 0.82rem; color: #991b1b; }
+    .att-btn.sub { border-style: dashed; }
+    .role-tag { display: block; font-size: 0.62rem; color: #b45309; font-weight: bold; }
+    .att-issues { margin-bottom: 10px; padding: 8px 10px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 6px; font-size: 0.82rem; }
+    .iss-err { color: #dc2626; font-weight: bold; }
+    .iss-warn { color: #b45309; }
+    .iss-info { color: #64748b; }
+    .iss-ok { color: #059669; }
+    .preview-table td, .preview-table th { padding: 4px 6px; vertical-align: top; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h2 style="margin:0; font-size:1.15rem;">⚡ 체육대회 Live 운영 시스템</h2>
+    <div style="font-size:0.75rem; color:#64748b; margin-top:2px;" id="modeDesc">👀 학생 관람 모드 (실시간 동기화)</div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <span id="modeBadge" class="mode-badge badge-student">학생 모드</span>
+    <button class="btn btn-config admin-only" onclick="openRosterModal()">👥 명단 업로드</button>
+    <button class="btn btn-config admin-only" onclick="openConfigModal()">⚙️ 대회/대진표 설정</button>
+    <button class="btn btn-danger admin-only" onclick="resetAllData()">🗑️ 기록 초기화</button>
+    <button class="btn" id="authBtn" onclick="toggleAuth()">🔒 심판 로그인</button>
+  </div>
+</div>
+
+<div class="nav-tabs" id="gradeTabs">
+  <button class="active" onclick="switchGrade(1, this)">1학년</button>
+  <button onclick="switchGrade(2, this)">2학년</button>
+  <button onclick="switchGrade(3, this)">3학년</button>
+</div>
+
+<!-- 실시간 종합 순위표 -->
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <h3 style="margin:0; font-size:1rem;">📊 <span id="gradeTitle">1학년</span> 종합 순위표</h3>
+    <span style="font-size:0.7rem; color:#64748b;">*동점시: 줄다리기>피구>발야구>줄넘기>계주 우선</span>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead id="rankHead"></thead>
+      <tbody id="rankBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 종목별 상세 뷰 -->
+<div class="card">
+  <div class="event-tabs" id="eventTabBar"></div>
+  <div class="event-main-grid">
+    <div>
+      <div id="tournamentSection">
+        <h3 style="margin:0 0 8px 0; font-size:0.95rem;" id="bracketTitle">토너먼트 대진표</h3>
+        <div class="vertical-bracket" id="bracketArea"></div>
+      </div>
+      <div id="jumpropeSection" style="display:none;">
+        <h3 style="margin:0 0 4px 0; font-size:0.95rem;" id="jumpropeTitle">기록 측정 입력</h3>
+        <div class="inputs-grid" id="jumpropeInputs"></div>
+      </div>
+      <div id="raceSection" style="display:none;">
+        <h3 style="margin:0 0 4px 0; font-size:0.95rem;" id="raceTitle">순위 입력</h3>
+        <div class="inputs-grid" id="raceInputs"></div>
+      </div>
+    </div>
+    <div class="rank-summary-box">
+      <h4 id="eventRankSummaryTitle">🏆 종목 순위 및 배점</h4>
+      <div id="eventRankSummaryList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ✅ 인원 체크 (심판 전용) -->
+<div class="card admin-only" id="attCard">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+    <h3 style="margin:0; font-size:1rem;">✅ <span id="attTitle">인원 체크</span></h3>
+    <span class="hint">🔐 로그인한 심판끼리만 실시간 공유 · 학생 화면엔 표시 안 됨</span>
+  </div>
+  <div class="event-tabs" id="attClassTabs"></div>
+  <div id="attArea"></div>
+</div>
+
+<!-- 로그인 모달 -->
+<div class="modal" id="loginModal">
+  <div class="modal-content small">
+    <h3 style="margin:0 0 12px;">🔒 심판 로그인</h3>
+    <label class="hint">이메일</label>
+    <input class="login-field" id="loginEmail" type="email" autocomplete="username">
+    <label class="hint">비밀번호</label>
+    <input class="login-field" id="loginPw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()">
+    <div class="login-err" id="loginErr"></div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button class="btn" onclick="closeModal('loginModal')">취소</button>
+      <button class="btn btn-primary" id="loginSubmit" onclick="doLogin()">로그인</button>
+    </div>
+  </div>
+</div>
+
+<!-- 명단 업로드 모달 -->
+<div class="modal" id="rosterModal">
+  <div class="modal-content">
+    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid var(--border); padding-bottom:8px; margin-bottom:12px;">
+      <h3 style="margin:0;">👥 학생 명단 업로드</h3>
+      <button class="btn" onclick="closeRosterModal()">✕ 닫기</button>
+    </div>
+    <div style="margin-bottom:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label><strong>학년:</strong></label>
+      <select id="rosterGradeSelect" onchange="fillRosterEditor(this.value)" style="padding:4px 8px; font-weight:bold;">
+        <option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option>
+      </select>
+      <label><strong>반 지정:</strong></label>
+      <select id="rosterDefaultCls" onchange="updateRosterPreview()" style="padding:4px 8px;" title="서식에서 반을 못 찾을 때만 사용"></select>
+    </div>
+    <div style="margin-bottom:8px;">
+      <input type="file" id="rosterFile" accept=".xlsx,.xls,.csv,.txt" multiple onchange="loadRosterFiles(this)">
+      <button class="btn" style="margin-left:6px;" onclick="downloadTemplate()">📥 현재 종목으로 양식 다운로드</button>
+    </div>
+    <div class="hint" style="margin-bottom:6px; line-height:1.55;">
+      <strong>출전선수명단 서식(.xlsx)</strong>을 그대로 올리면 됩니다. 반별 파일 여러 개를 <strong>한꺼번에 선택</strong>해도 되고, 한 파일에 반별 시트로 넣어도 됩니다.<br>
+      · 종목 칸에 <code>O</code>(또는 0, ○, V) 표시 = 출전 · 칸에 <code>주장</code>/<code>후보</code>라고 쓰면 역할까지 표시 · 환자 칸 표시 = 체크 제외<br>
+      · 반은 서식 제목 <code>1학년 ( 3 )반</code> → 시트 이름 <code>3반</code> → 파일 이름 순으로 자동 인식 (실패 시 위 '반 지정' 사용)<br>
+      · 불러온 내용은 아래 칸에 표준 목록으로 바뀌어 들어옵니다. 오타는 여기서 고친 뒤 업로드하세요.
+    </div>
+    <div class="hint" id="rosterFileNotes" style="margin-bottom:6px; line-height:1.5;"></div>
+    <textarea id="rosterText" oninput="updateRosterPreview()" placeholder="반	번호	이름	출전종목	비고&#10;1반	1	홍길동	발야구(주장)/단체줄넘기&#10;1반	2	김철수	피구/3인4각&#10;1반	3	이영희		환자"></textarea>
+    <div class="hint" id="rosterPreview" style="margin-top:4px;"></div>
+    <div style="display:flex; justify-content:space-between; gap:8px; border-top:1px solid var(--border); padding-top:12px; margin-top:10px;">
+      <button class="btn btn-danger" onclick="clearGradeRoster()">이 학년 명단 삭제</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" onclick="closeRosterModal()">취소</button>
+        <button class="btn btn-primary" id="rosterSaveBtn" onclick="applyRoster()">☁️ 업로드 (심판 전체 공유)</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 대회 설정 모달 -->
+<div class="modal" id="configModal">
+  <div class="modal-content">
+    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid var(--border); padding-bottom:8px; margin-bottom:12px;">
+      <h3 style="margin:0;">⚙️ 대회 구조 / 대진표 / 배점 편집기</h3>
+      <button class="btn" onclick="closeModal('configModal')">✕ 닫기</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label><strong>설정할 학년 선택:</strong></label>
+      <select id="cfgGradeSelect" onchange="loadGradeConfigToEditor(this.value)" style="padding:4px 8px; font-weight:bold;">
+        <option value="1">1학년</option><option value="2">2학년</option><option value="3">3학년</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label><strong>참가 학급(팀) 목록 (쉼표 구분):</strong></label>
+      <input type="text" id="cfgTeamsInput" style="width:100%; padding:6px; margin-top:4px;">
+    </div>
+    <h4>종목 목록 및 대진표 / 배점 설정</h4>
+    <div id="cfgEventsContainer"></div>
+    <button class="btn" onclick="addNewEventToConfig()" style="margin-bottom:14px;">+ 새 종목 추가</button>
+    <div style="display:flex; justify-content:flex-end; gap:8px; border-top:1px solid var(--border); padding-top:12px;">
+      <button class="btn" onclick="closeModal('configModal')">취소</button>
+      <button class="btn btn-primary" onclick="saveMasterConfigToServer()">💾 설정 저장 및 전체 적용</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ===================== Firebase =====================
+  const firebaseConfig = {
+    apiKey: "AIzaSyBd069_AxTBOdMKNLVN83LxeToLjMWIu1E",
+    authDomain: "sports-day-live.firebaseapp.com",
+    projectId: "sports-day-live",
+    storageBucket: "sports-day-live.firebasestorage.app",
+    messagingSenderId: "783783259182",
+    appId: "1:783783259182:web:832532630365a9000dc3bf"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const auth = firebase.auth();
+
+  // ※ 비밀번호(PIN)는 더 이상 코드에 없음. 심판 권한은 Firebase 보안 규칙(firestore.rules)의 이메일 목록으로 결정.
+  let isAdmin = false;
+  let currentUser = null;
+  let currentGrade = 1;
+  let currentEventId = 'tug';
+  let matchData = {};
+  let roster = {};        // { 1: [{cls, no, name, events:[]}], ... }  ← 심판만 읽기 가능
+  let attendance = {};    // { 1: { 이벤트ID: { 학생키: true } } }     ← 심판만 읽기 가능
+  let privateUnsubs = [];
+  let attClass = '';
+  let attOnlyEntrants = true;
+
+  // 기본 마스터 설정 (2026 계획서 구조)
+  let masterConfig = {
+    grades: {
+      1: {
+        teams: ["1반","2반","3반","4반","5반","6반","7반","8반","9반","10반"],
+        events: [
+          { id: "tug", name: "줄다리기", type: "tournament", pts: { r1: 120, r2: 100, r3: 80, r5: 60, etc: 40 }, bracket: { m1: ["7반","2반"], m2: ["10반","6반"], m3: ["5반","9반"], m4: ["4반","3반"], b1: "1반", b2: "8반" } },
+          { id: "dodge", name: "피구", type: "tournament", pts: { r1: 90, r2: 70, r3: 50, r5: 40, etc: 20 }, bracket: { m1: ["10반","4반"], m2: ["3반","8반"], m3: ["7반","5반"], m4: ["2반","1반"], b1: "9반", b2: "6반" } },
+          { id: "kickball", name: "발야구", type: "tournament", pts: { r1: 90, r2: 70, r3: 50, r5: 40, etc: 20 }, bracket: { m1: ["4반","10반"], m2: ["9반","7반"], m3: ["6반","5반"], m4: ["2반","8반"], b1: "1반", b2: "3반" } },
+          { id: "futsal", name: "풋살", type: "tournament", pts: { r1: 70, r2: 50, r3: 30, r5: 20, etc: 10 }, bracket: { m1: ["1반","7반"], m2: ["6반","4반"], m3: ["3반","9반"], m4: ["8반","10반"], b1: "2반", b2: "5반" } },
+          { id: "arm", name: "팔씨름", type: "tournament", pts: { r1: 60, r2: 50, r3: 40, r5: 20, etc: 10 }, bracket: { m1: ["1반","10반"], m2: ["3반","6반"], m3: ["4반","5반"], m4: ["2반","8반"], b1: "7반", b2: "9반" } },
+          { id: "jumprope", name: "단체줄넘기", type: "jumprope", pts: { r1: 80, r2: 70, r3: 60, r4: 50, r5: 40, etc: 20 } },
+          { id: "legged3", name: "3인4각", type: "race", pts: { r1: 80, r2: 70, r3: 60, r4: 50, etc: 30 } },
+          { id: "relay", name: "600M 계주", type: "race", pts: { r1: 80, r2: 70, r3: 60, r4: 50, etc: 30 } }
+        ]
+      },
+      2: {
+        teams: ["1반","2반","3반","4반","5반","6반","7반","8반","9반","10반"],
+        events: [
+          { id: "tug", name: "줄다리기", type: "tournament", pts: { r1: 120, r2: 100, r3: 80, r5: 60, etc: 40 }, bracket: { m1: ["8반","2반"], m2: ["3반","1반"], m3: ["6반","4반"], m4: ["9반","10반"], b1: "5반", b2: "7반" } },
+          { id: "dodge", name: "피구", type: "tournament", pts: { r1: 90, r2: 70, r3: 50, r5: 40, etc: 20 }, bracket: { m1: ["3반","2반"], m2: ["8반","4반"], m3: ["1반","9반"], m4: ["10반","6반"], b1: "7반", b2: "5반" } },
+          { id: "kickball", name: "발야구", type: "tournament", pts: { r1: 90, r2: 70, r3: 50, r5: 40, etc: 20 }, bracket: { m1: ["1반","5반"], m2: ["6반","10반"], m3: ["3반","7반"], m4: ["9반","4반"], b1: "2반", b2: "8반" } },
+          { id: "bigvolley", name: "빅발리볼", type: "tournament", pts: { r1: 70, r2: 50, r3: 30, r5: 20, etc: 10 }, bracket: { m1: ["1반","5반"], m2: ["10반","4반"], m3: ["7반","8반"], m4: ["9반","6반"], b1: "2반", b2: "3반" } },
+          { id: "arm", name: "팔씨름", type: "tournament", pts: { r1: 60, r2: 50, r3: 40, r5: 20, etc: 10 }, bracket: { m1: ["4반","10반"], m2: ["9반","6반"], m3: ["3반","7반"], m4: ["5반","8반"], b1: "2반", b2: "1반" } },
+          { id: "jumprope", name: "단체줄넘기", type: "jumprope", pts: { r1: 80, r2: 70, r3: 60, r4: 50, r5: 40, etc: 20 } },
+          { id: "legged3", name: "3인4각", type: "race", pts: { r1: 80, r2: 70, r3: 60, r4: 50, etc: 30 } },
+          { id: "relay", name: "600M 계주", type: "race", pts: { r1: 80, r2: 70, r3: 60, r4: 50, etc: 30 } }
+        ]
+      },
+      3: {
+        teams: ["1반","2반","3반","4반","5반","6반","7반","8반","9반","10반"],
+        events: [
+          { id: "tug", name: "줄다리기", type: "tournament", pts: { r1: 120, r2: 100, r3: 80, r5: 60, etc: 40 }, bracket: { m1: ["1반","3반"], m2: ["2반","8반"], m3: ["6반","10반"], m4: ["5반","9반"], b1: "7반", b2: "4반" } },
+          { id: "dodge", name: "피구", type: "tournament", pts: { r1: 90, r2: 70, r3: 50, r5: 40, etc: 20 }, bracket: { m1: ["10반","9반"], m2: ["6반","2반"], m3: ["3반","4반"], m4: ["1반","7반"], b1: "5반", b2: "8반" } },
+          { id: "kickball", name: "발야구", type: "tournament", pts: { r1: 90, r2: 70, r3: 50, r5: 40, etc: 20 }, bracket: { m1: ["10반","3반"], m2: ["8반","9반"], m3: ["2반","5반"], m4: ["1반","4반"], b1: "7반", b2: "6반" } },
+          { id: "bigvolley", name: "빅발리볼", type: "tournament", pts: { r1: 70, r2: 50, r3: 30, r5: 20, etc: 10 }, bracket: { m1: ["6반","2반"], m2: ["5반","1반"], m3: ["3반","8반"], m4: ["10반","4반"], b1: "9반", b2: "7반" } },
+          { id: "arm", name: "팔씨름", type: "tournament", pts: { r1: 60, r2: 50, r3: 40, r5: 20, etc: 10 }, bracket: { m1: ["1반","4반"], m2: ["6반","10반"], m3: ["5반","9반"], m4: ["3반","7반"], b1: "8반", b2: "2반" } },
+          { id: "jumprope", name: "단체줄넘기", type: "jumprope", pts: { r1: 80, r2: 70, r3: 60, r4: 50, r5: 40, etc: 20 } },
+          { id: "legged3", name: "3인4각", type: "race", pts: { r1: 80, r2: 70, r3: 60, r4: 50, etc: 30 } },
+          { id: "relay", name: "600M 계주", type: "race", pts: { r1: 80, r2: 70, r3: 60, r4: 50, etc: 30 } }
+        ]
+      }
+    }
+  };
+
+  // ===================== 공용 유틸 =====================
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+  }
+  function closeModal(id) { document.getElementById(id).style.display = "none"; }
+  function onWriteError(e) {
+    console.error(e);
+    alert(e.code === 'permission-denied' ? "저장 권한이 없습니다. 심판 계정으로 다시 로그인하세요." : "저장 실패: " + e.message);
+  }
+
+  // ===================== 실시간 동기화 (공개 데이터) =====================
+  function initPublicSync() {
+    db.collection("settings").doc("masterConfig").onSnapshot(doc => {
+      if (doc.exists) masterConfig = doc.data();
+      else if (isAdmin) db.collection("settings").doc("masterConfig").set(masterConfig).catch(onWriteError);
+      renderAll();
+    }, e => console.warn("설정 구독 오류", e));
+
+    db.collection("matches").doc("allResults").onSnapshot(doc => {
+      matchData = doc.exists ? doc.data() : {};
+      renderAll();
+    }, e => console.warn("결과 구독 오류", e));
+  }
+
+  // ===================== 심판 전용 데이터 (명단·출석) =====================
+  function subscribePrivate() {
+    unsubscribePrivate();
+    [1, 2, 3].forEach(g => {
+      privateUnsubs.push(db.collection("rosters").doc(`G${g}`).onSnapshot(doc => {
+        roster[g] = doc.exists ? (doc.data().students || []) : [];
+        renderAll();
+      }, e => console.warn("명단 구독 오류", e)));
+      privateUnsubs.push(db.collection("attendance").doc(`G${g}`).onSnapshot(doc => {
+        attendance[g] = doc.exists ? doc.data() : {};
+        renderAttendance();
+      }, e => console.warn("출석 구독 오류", e)));
+    });
+  }
+  function unsubscribePrivate() {
+    privateUnsubs.forEach(u => u());
+    privateUnsubs = [];
+    roster = {};          // 로그아웃 시 메모리에서도 삭제
+    attendance = {};
+  }
+
+  // ===================== 로그인 =====================
+  auth.onAuthStateChanged(async user => {
+    if (!user) { setAdminUI(false); return; }
+    try {
+      await db.collection("rosters").doc("G1").get();   // 심판 권한 확인 (보안 규칙 통과 여부)
+      currentUser = user;
+      setAdminUI(true);
+      subscribePrivate();
+    } catch (e) {
+      if (e.code === 'permission-denied') alert(`${user.email} 계정은 심판 권한이 없습니다.\n관리 교사에게 등록을 요청하세요.`);
+      else alert("서버 연결 오류: " + e.message);
+      auth.signOut();
+    }
+  });
+
+  function setAdminUI(on) {
+    isAdmin = on;
+    document.body.classList.toggle("is-admin", on);
+    const badge = document.getElementById("modeBadge");
+    badge.className = "mode-badge " + (on ? "badge-admin" : "badge-student");
+    badge.innerText = on ? "심판/관리자 모드" : "학생 모드";
+    document.getElementById("modeDesc").innerText = on
+      ? `✏️ ${currentUser?.email || ''} · 승자 터치, 스코어 입력, 인원 체크 가능`
+      : "👀 학생 관람 모드 (실시간 동기화)";
+    document.getElementById("authBtn").innerText = on ? "로그아웃" : "🔒 심판 로그인";
+    if (!on) { currentUser = null; unsubscribePrivate(); ['rosterModal','configModal'].forEach(closeModal); }
+    renderAll();
+  }
+
+  function toggleAuth() {
+    if (isAdmin) { auth.signOut(); return; }
+    document.getElementById("loginErr").innerText = "";
+    document.getElementById("loginPw").value = "";
+    document.getElementById("loginModal").style.display = "flex";
+    setTimeout(() => document.getElementById("loginEmail").focus(), 50);
+  }
+
+  async function doLogin() {
+    const email = document.getElementById("loginEmail").value.trim();
+    const pw = document.getElementById("loginPw").value;
+    const err = document.getElementById("loginErr"), btn = document.getElementById("loginSubmit");
+    if (!email || !pw) { err.innerText = "이메일과 비밀번호를 입력하세요."; return; }
+    btn.disabled = true; err.innerText = "";
+    try {
+      await auth.signInWithEmailAndPassword(email, pw);
+      closeModal("loginModal");
+    } catch (e) {
+      const msg = {
+        "auth/invalid-credential": "이메일 또는 비밀번호가 틀렸습니다.",
+        "auth/wrong-password": "이메일 또는 비밀번호가 틀렸습니다.",
+        "auth/user-not-found": "이메일 또는 비밀번호가 틀렸습니다.",
+        "auth/invalid-email": "이메일 형식이 올바르지 않습니다.",
+        "auth/too-many-requests": "시도가 너무 많습니다. 잠시 후 다시 시도하세요.",
+        "auth/network-request-failed": "인터넷 연결을 확인하세요."
+      }[e.code] || e.message;
+      err.innerText = msg;
+    } finally { btn.disabled = false; }
+  }
+
+  function resetAllData() {
+    if (!isAdmin) return;
+    if (confirm("⚠️ 모든 경기 결과와 점수 기록을 초기화하시겠습니까? (명단·출석은 유지)")) {
+      if (prompt("초기화를 진행하려면 '초기화'를 입력하세요:") === "초기화") {
+        db.collection("matches").doc("allResults").set({})
+          .then(() => alert("기록이 성공적으로 초기화되었습니다.")).catch(onWriteError);
+      }
+    }
+  }
+
+  // ===================== 화면 전환 =====================
+  function switchGrade(grade, btn) {
+    currentGrade = Number(grade);
+    document.querySelectorAll("#gradeTabs button").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("gradeTitle").innerText = `${grade}학년`;
+    const gCfg = masterConfig.grades[currentGrade];
+    if (gCfg && gCfg.events.length > 0) currentEventId = gCfg.events[0].id;
+    renderAll();
+  }
+
+  function switchEventTab(evtId, btn) {
+    currentEventId = evtId;
+    document.querySelectorAll("#eventTabBar button").forEach(b => b.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    renderEventView();
+    renderAttendance();
+  }
+
+  // ===================== 경기 결과 입력 (필드 단위 병합 저장 → 심판 동시 입력 시 덮어쓰기 방지) =====================
+  function saveResultField(key, field, value) {
+    if (!matchData[key]) matchData[key] = {};
+    matchData[key][field] = value;
+    db.collection("matches").doc("allResults").set({ [key]: { [field]: value } }, { merge: true }).catch(onWriteError);
+  }
+  function handleMatchClick(evtId, matchId, team) {
+    if (!isAdmin || !team || team.includes("승자")) return;
+    const key = `G${currentGrade}_${evtId}`;
+    const cur = (matchData[key] || {})[matchId];
+    saveResultField(key, matchId, cur === team ? "" : team);
+  }
+  function handleScoreChange(evtId, scoreKey, val) {
+    if (!isAdmin) return;
+    saveResultField(`G${currentGrade}_${evtId}`, scoreKey, val);
+  }
+  function handleRaceChange(evtId, rankField, team) {
+    if (!isAdmin) return;
+    saveResultField(`G${currentGrade}_${evtId}`, rankField, team);
+  }
+  function handleJumpropeChange(team, count) {
+    if (!isAdmin) return;
+    saveResultField(`G${currentGrade}_jumprope`, team, parseInt(count, 10) || 0);
+  }
+
+  // ===================== 대진표·종목 화면 =====================
+  function createMatchBoxHtml(evtId, matchId, team1, team2, res, label, isFinal = false) {
+    const winner = res[matchId] || '';
+    const s1 = res[`${matchId}_s1`] || '';
+    const s2 = res[`${matchId}_s2`] || '';
+    return `
+      <div class="match-card ${isFinal ? 'final-card' : ''}" style="${isFinal ? '' : 'width:46%;'}">
+        ${label ? `<div style="font-size:0.65rem; color:#64748b; margin-bottom:2px;">[${label}]</div>` : ''}
+        <div class="team-row">
+          <div class="team-btn ${winner === team1 && team1 ? 'win' : ''}" onclick="handleMatchClick('${evtId}', '${matchId}', '${team1}')">${team1 || '-'}</div>
+          <input type="text" class="score-input" value="${s1}" placeholder="0" ${isAdmin ? '' : 'disabled'} onchange="handleScoreChange('${evtId}', '${matchId}_s1', this.value)">
+        </div>
+        <div class="team-row">
+          <div class="team-btn ${winner === team2 && team2 ? 'win' : ''}" onclick="handleMatchClick('${evtId}', '${matchId}', '${team2}')">${team2 || '-'}</div>
+          <input type="text" class="score-input" value="${s2}" placeholder="0" ${isAdmin ? '' : 'disabled'} onchange="handleScoreChange('${evtId}', '${matchId}_s2', this.value)">
+        </div>
+      </div>
+    `;
+  }
+
+  function renderEventView() {
+    const gCfg = masterConfig.grades[currentGrade];
+    if (!gCfg) return;
+    const evt = gCfg.events.find(e => e.id === currentEventId) || gCfg.events[0];
+    if (!evt) return;
+
+    document.getElementById("tournamentSection").style.display = (evt.type === 'tournament') ? "block" : "none";
+    document.getElementById("jumpropeSection").style.display = (evt.type === 'jumprope') ? "block" : "none";
+    document.getElementById("raceSection").style.display = (evt.type === 'race') ? "block" : "none";
+
+    const res = matchData[`G${currentGrade}_${evt.id}`] || {};
+
+    if (evt.type === 'tournament') {
+      document.getElementById("bracketTitle").innerText = `${evt.name} 토너먼트 대진표`;
+      const tpl = evt.bracket || { m1: ["1반","2반"], m2: ["3반","4반"], m3: ["5반","6반"], m4: ["7반","8반"], b1: "9반", b2: "10반" };
+      const m1_w = res['m1'] || '', m2_w = res['m2'] || '', m3_w = res['m3'] || '', m4_w = res['m4'] || '';
+      const m5_w = res['m5'] || '', m6_w = res['m6'] || '';
+      const semi1_w = res['semi1'] || '', semi2_w = res['semi2'] || '';
+
+      document.getElementById("bracketArea").innerHTML = `
+        <div>
+          <div class="bracket-level-title">🏆 결승전</div>
+          <div class="bracket-row">
+            ${createMatchBoxHtml(evt.id, 'final', semi1_w || '준결1 승자', semi2_w || '준결2 승자', res, '', true)}
+          </div>
+        </div>
+        <div style="text-align:center; color:#94a3b8; font-size:0.75rem;">▲</div>
+        <div>
+          <div class="bracket-level-title">준결승 (4강)</div>
+          <div class="bracket-row">
+            ${createMatchBoxHtml(evt.id, 'semi1', m3_w || '3경기 승자', m5_w || '5경기 승자', res, '준결 1경기')}
+            ${createMatchBoxHtml(evt.id, 'semi2', m6_w || '6경기 승자', m4_w || '4경기 승자', res, '준결 2경기')}
+          </div>
+        </div>
+        <div style="text-align:center; color:#94a3b8; font-size:0.75rem;">▲</div>
+        <div>
+          <div class="bracket-level-title">8강전 (부전승 합류)</div>
+          <div class="bracket-row">
+            ${createMatchBoxHtml(evt.id, 'm5', `${tpl.b1} (부전)`, m1_w || '1경기 승자', res, '5경기')}
+            ${createMatchBoxHtml(evt.id, 'm6', m2_w || '2경기 승자', `${tpl.b2} (부전)`, res, '6경기')}
+          </div>
+        </div>
+        <div style="text-align:center; color:#94a3b8; font-size:0.75rem;">▲</div>
+        <div>
+          <div class="bracket-level-title">1회전 (예선)</div>
+          <div class="bracket-row" style="display:grid; grid-template-columns: repeat(4, 1fr); gap:6px;">
+            ${createMatchBoxHtml(evt.id, 'm3', tpl.m3[0], tpl.m3[1], res, '3경기')}
+            ${createMatchBoxHtml(evt.id, 'm1', tpl.m1[0], tpl.m1[1], res, '1경기')}
+            ${createMatchBoxHtml(evt.id, 'm2', tpl.m2[0], tpl.m2[1], res, '2경기')}
+            ${createMatchBoxHtml(evt.id, 'm4', tpl.m4[0], tpl.m4[1], res, '4경기')}
+          </div>
+        </div>
+      `;
+    } else if (evt.type === 'jumprope') {
+      document.getElementById("jumpropeTitle").innerText = `${evt.name} - 기록 측정`;
+      document.getElementById("jumpropeInputs").innerHTML = gCfg.teams.map(t => `
+          <div class="input-card">
+            <strong>${t}</strong>
+            <input type="number" min="0" value="${res[t] || 0}" ${isAdmin ? '' : 'disabled'} onchange="handleJumpropeChange('${t}', this.value)">
+          </div>`).join('');
+    } else if (evt.type === 'race') {
+      document.getElementById("raceTitle").innerText = `${evt.name} - 순위 결정`;
+      document.getElementById("raceInputs").innerHTML = ['1위', '2위', '3위', '4위'].map((label, idx) => {
+        const field = `rank${idx + 1}`;
+        const selVal = res[field] || '';
+        const opts = `<option value="">선택</option>` + gCfg.teams.map(t => `<option value="${t}" ${selVal === t ? 'selected' : ''}>${t}</option>`).join('');
+        return `
+          <div class="input-card">
+            <strong>${label}</strong>
+            <select ${isAdmin ? '' : 'disabled'} onchange="handleRaceChange('${evt.id}', '${field}', this.value)">${opts}</select>
+          </div>`;
+      }).join('');
+    }
+
+    renderEventRankSummary(evt, res, gCfg);
+  }
+
+  function renderEventRankSummary(evt, res, gCfg) {
+    const list = document.getElementById("eventRankSummaryList");
+    document.getElementById("eventRankSummaryTitle").innerText = `🏆 ${evt.name} 배점 현황`;
+
+    if (evt.type === 'jumprope') {
+      let arr = gCfg.teams.map(t => ({ team: t, count: res[t] || 0 }));
+      arr.sort((a, b) => b.count - a.count);
+      const ptsList = [evt.pts.r1, evt.pts.r2, evt.pts.r3, evt.pts.r4, evt.pts.r5];
+      list.innerHTML = arr.map((item, idx) => {
+        const cls = idx === 0 ? 'gold' : idx === 1 ? 'silver' : idx === 2 ? 'bronze' : 'etc';
+        const p = ptsList[idx] !== undefined ? ptsList[idx] : evt.pts.etc;
+        return `<div class="rank-item ${cls}"><span>${idx + 1}위: <strong>${item.team}</strong> (${item.count})</span><span>+${p}점</span></div>`;
+      }).join('');
+      return;
+    }
+
+    if (evt.type === 'race') {
+      const ptsList = [evt.pts.r1, evt.pts.r2, evt.pts.r3, evt.pts.r4];
+      let html = '';
+      ['1위', '2위', '3위', '4위'].forEach((label, idx) => {
+        const t = res[`rank${idx + 1}`] || '미정';
+        const cls = idx === 0 ? 'gold' : idx === 1 ? 'silver' : idx === 2 ? 'bronze' : 'top8';
+        html += `<div class="rank-item ${cls}"><span>${label}: <strong>${t}</strong></span><span>+${ptsList[idx]}점</span></div>`;
+      });
+      html += `<div class="rank-item etc"><span>기타 참가팀</span><span>+${evt.pts.etc}점</span></div>`;
+      list.innerHTML = html;
+      return;
+    }
+
+    const finalW = res['final'] || '';
+    const semi1_w = res['semi1'] || '', semi2_w = res['semi2'] || '';
+    const runnerUp = (finalW && semi1_w && semi2_w) ? (finalW === semi1_w ? semi2_w : semi1_w) : '';
+    list.innerHTML = `
+      <div class="rank-item gold"><span>🥇 1위 (우승): <strong>${finalW || '진행중'}</strong></span><span>+${evt.pts.r1}점</span></div>
+      <div class="rank-item silver"><span>🥈 2위 (준우승): <strong>${runnerUp || '진행중'}</strong></span><span>+${evt.pts.r2}점</span></div>
+      <div class="rank-item bronze"><span>🥉 4강 (3위)</span><span>+${evt.pts.r3}점</span></div>
+      <div class="rank-item top8"><span>🎖️ 8강 (5위)</span><span>+${evt.pts.r5}점</span></div>
+      <div class="rank-item etc"><span>참가 (등외)</span><span>+${evt.pts.etc}점</span></div>
+    `;
+  }
+
+  function renderLeaderboard() {
+    const gCfg = masterConfig.grades[currentGrade];
+    if (!gCfg) return;
+
+    let scores = {};
+    gCfg.teams.forEach(t => {
+      scores[t] = { team: t, total: 0, items: {} };
+      gCfg.events.forEach(e => { scores[t].items[e.id] = e.pts.etc || 0; });
+    });
+
+    gCfg.events.forEach(evt => {
+      const res = matchData[`G${currentGrade}_${evt.id}`] || {};
+      if (evt.type === 'tournament') {
+        ['m1','m2','m3','m4'].forEach(mid => { if (res[mid] && scores[res[mid]]) scores[res[mid]].items[evt.id] = evt.pts.r5; });
+        ['m5','m6'].forEach(mid => { if (res[mid] && scores[res[mid]]) scores[res[mid]].items[evt.id] = evt.pts.r3; });
+        ['semi1','semi2'].forEach(mid => { if (res[mid] && scores[res[mid]]) scores[res[mid]].items[evt.id] = evt.pts.r2; });
+        if (res['final'] && scores[res['final']]) scores[res['final']].items[evt.id] = evt.pts.r1;
+      } else if (evt.type === 'jumprope') {
+        let arr = gCfg.teams.map(t => ({ team: t, count: res[t] || 0 }));
+        arr.sort((a, b) => b.count - a.count);
+        const ptsList = [evt.pts.r1, evt.pts.r2, evt.pts.r3, evt.pts.r4, evt.pts.r5];
+        arr.forEach((item, idx) => {
+          if (scores[item.team]) scores[item.team].items[evt.id] = ptsList[idx] !== undefined ? ptsList[idx] : evt.pts.etc;
+        });
+      } else if (evt.type === 'race') {
+        const ptsList = [evt.pts.r1, evt.pts.r2, evt.pts.r3, evt.pts.r4];
+        [1,2,3,4].forEach(idx => {
+          const t = res[`rank${idx}`];
+          if (t && scores[t]) scores[t].items[evt.id] = ptsList[idx-1];
+        });
+      }
+    });
+
+    let scoreList = Object.values(scores);
+    scoreList.forEach(s => { s.total = Object.values(s.items).reduce((a, b) => a + b, 0); });
+    scoreList.sort((a, b) => {
+      if (b.total !== a.total) return b.total - a.total;
+      for (let e of gCfg.events) { if (b.items[e.id] !== a.items[e.id]) return b.items[e.id] - a.items[e.id]; }
+      return 0;
+    });
+
+    let thHtml = `<tr><th>순위</th><th>학급</th><th>총점</th>`;
+    gCfg.events.forEach(e => { thHtml += `<th>${e.name}</th>`; });
+    document.getElementById("rankHead").innerHTML = thHtml + `</tr>`;
+    document.getElementById("rankBody").innerHTML = scoreList.map((s, idx) => `
+      <tr class="${idx === 0 ? 'rank-1' : idx === 1 ? 'rank-2' : idx === 2 ? 'rank-3' : ''}">
+        <td><strong>${idx + 1}위</strong></td>
+        <td><strong>${s.team}</strong></td>
+        <td><strong>${s.total}</strong></td>
+        ${gCfg.events.map(e => `<td>${s.items[e.id]}</td>`).join('')}
+      </tr>`).join('');
+  }
+
+  function renderTabs() {
+    const gCfg = masterConfig.grades[currentGrade];
+    if (!gCfg) return;
+    document.getElementById("eventTabBar").innerHTML = gCfg.events.map(e => `
+      <button class="${e.id === currentEventId ? 'active' : ''}" onclick="switchEventTab('${e.id}', this)">${e.name}</button>
+    `).join('');
+  }
+
+  function renderAll() {
+    renderTabs();
+    renderLeaderboard();
+    renderEventView();
+    renderAttendance();
+  }
+
+  // ===================== 명단 파싱 =====================
+  // 기본 규칙(설정에 값이 없을 때만 사용). 실제 규칙은 ⚙️ 대회 설정의 종목별 '중복금지 그룹'·'정원'에서 수정
+  const EVENT_RULES = {
+    groups: [["발야구", "피구"], ["단체줄넘기", "슬리퍼컬링", "빅발리볼", "팔씨름"], ["3인4각", "계주"]],
+    quota: { "발야구": 10, "피구": 12, "단체줄넘기": 7, "슬리퍼컬링": 6, "빅발리볼": 6, "팔씨름": 5, "3인4각": 6, "계주": 6 }
+  };
+  const NO_MARK = /^(x|×|✕|-|–|n|no|없음|0개)$/i;   // 빈칸·X는 미출전, 그 외(O, 0, ○, V, 주장, 후보…)는 출전
+
+  function normClass(v) { v = String(v ?? "").trim(); return /^\d+$/.test(v) ? v + "반" : v; }
+  function normKey(s) { return String(s || "").replace(/\s/g, "").toLowerCase(); }
+  function matchesEvent(stuEvt, evt) {
+    const a = normKey(stuEvt), n = normKey(evt.name);
+    if (!a) return false;
+    return a === n || a === normKey(evt.id) || n.includes(a) || a.includes(n);   // "계주" ↔ "600M 계주", "3인4각릴레이" ↔ "3인4각"
+  }
+  function ruleKeyOf(name) { const k = normKey(name); return Object.keys(EVENT_RULES.quota).find(r => k.includes(normKey(r))) || null; }
+  // 종목별 규칙: 설정값 우선, 없으면 기본값
+  function defaultRule(name) {
+    const k = ruleKeyOf(name);
+    const gi = EVENT_RULES.groups.findIndex(g => g.includes(k));
+    return { group: gi >= 0 ? "ABCDE"[gi] : "", quota: (k && EVENT_RULES.quota[k]) || 0, listed: !/줄다리기/.test(name) };
+  }
+  function ruleOfEvt(evt) {
+    const d = defaultRule(evt.name);
+    return { group: evt.group ?? d.group, quota: evt.quota ?? d.quota, listed: evt.listed ?? d.listed };
+  }
+  function ruleOfName(name, grade) {
+    const evt = (masterConfig.grades[grade]?.events || []).find(e => matchesEvent(name, e));
+    return evt ? ruleOfEvt(evt) : { group: "", quota: 0, listed: true };
+  }
+  function studentKey(s) { return `${s.cls}_${s.no}_${s.name}`.replace(/[.~*\/\[\]`]/g, ""); }
+  function cleanHeader(h) { return String(h ?? "").replace(/\(.*?\)/g, "").replace(/\s+/g, "").trim(); }
+
+  // 명단 종목명을 대회 설정의 종목명으로 맞춤 (예: "3인4각릴레이" → "3인4각")
+  function canonicalEventName(raw, grade) {
+    const evts = masterConfig.grades[grade]?.events || [];
+    const hit = evts.find(e => matchesEvent(raw, e));
+    return hit ? hit.name : raw;
+  }
+
+  // 따옴표 처리되는 간이 CSV/TSV 분리
+  function splitLine(line) {
+    const delim = line.includes("\t") ? "\t" : ",";
+    const out = []; let cur = "", q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+      else if (ch === delim && !q) { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out.map(c => c.trim());
+  }
+
+  // 시트 위쪽 제목에서 "( 3 )반", "3학년" 찾기
+  function detectFromTitle(rows, upto) {
+    let cls = "", grade = "";
+    rows.slice(0, Math.max(upto, 1)).forEach(r => r.forEach(c => {
+      const s = String(c ?? "");
+      const m = s.match(/\(\s*(\d{1,2})\s*\)\s*반/) || s.match(/(?:^|[^\d학])(\d{1,2})\s*반/);
+      if (m && !cls) cls = m[1] + "반";
+      const g = s.match(/([1-3])\s*학년/);
+      if (g && !grade) grade = g[1];
+    }));
+    return { cls, grade };
+  }
+
+  /**
+   * 한 시트(2차원 배열) → 학생 목록
+   * 지원 형식 ① 출전선수명단(번|성명|발야구|피구|…|환자, 칸에 O 표시)
+   *          ② 목록형(반|번호|이름|출전종목|비고)
+   */
+  function rowsToStudents(rows, ctx = {}) {
+    rows = rows.map(r => r.map(c => String(c ?? "").trim()));
+    const grade = ctx.grade || currentGrade;
+    const out = { students: [], skipped: 0, notes: [] };
+    const headIdx = rows.slice(0, 20).findIndex(r => r.some(c => /^(성명|이름)$/.test(cleanHeader(c))));
+
+    let col = { cls: -1, no: -1, name: -1, list: -1, patient: -1, note: -1 }, eventCols = [];
+    if (headIdx > -1) {
+      rows[headIdx].forEach((c, j) => {
+        const h = cleanHeader(c);
+        if (!h) return;
+        if (/^번호?$/.test(h)) col.no = j;
+        else if (/^(성명|이름)$/.test(h)) col.name = j;
+        else if (/^(반|학급|반명)$/.test(h)) col.cls = j;
+        else if (/^(출전)?종목$|출전종목/.test(h)) col.list = j;
+        else if (/^환자/.test(h)) col.patient = j;
+        else if (/^(비고|역할|구분)$/.test(h)) col.note = j;
+        else if (!/^(학년|순|인원)$/.test(h)) eventCols.push({ j, name: canonicalEventName(h, grade) });
+      });
+    } else {
+      col = { cls: 0, no: 1, name: 2, list: 3, patient: -1, note: 4 };   // 제목 없는 목록형
+    }
+
+    const title = detectFromTitle(rows, headIdx);
+    if (title.grade && String(title.grade) !== String(grade))
+      out.notes.push(`⚠️ ${ctx.label || "명단"}: 서식은 ${title.grade}학년인데 ${grade}학년으로 업로드 중`);
+    const teamsG = masterConfig.grades[grade]?.teams || [];
+    const fallbackCls = title.cls
+      || (teamsG.includes(String(ctx.sheetName || "").trim()) ? String(ctx.sheetName).trim() : "")
+      || ((String(ctx.sheetName || "").trim().match(/^(\d{1,2})\s*반?$/) || [])[1] ? String(ctx.sheetName).trim().match(/^(\d{1,2})/)[1] + "반" : "")
+      || ((String(ctx.fileName || "").match(/(?:^|[^\d])(\d{1,2})\s*반/) || [])[1] ? String(ctx.fileName).match(/(?:^|[^\d])(\d{1,2})\s*반/)[1] + "반" : "")
+      || ctx.defaultCls || "";
+
+    rows.slice(headIdx + 1).forEach(r => {
+      const name = String(r[col.name] ?? "").trim();
+      if (!name) return;                                    // 빈 번호 줄은 조용히 무시
+      if (/^(성명|이름)$/.test(cleanHeader(name))) return;   // 반복 제목 줄
+      const cls = col.cls >= 0 && r[col.cls] ? normClass(r[col.cls]) : fallbackCls;
+      if (!cls) { out.skipped++; return; }
+
+      const events = [], roles = {};
+      eventCols.forEach(({ j, name: ev }) => {
+        const v = String(r[j] ?? "").trim();
+        if (!v || NO_MARK.test(v)) return;
+        events.push(ev);
+        if (/주/.test(v)) roles[ev] = "주장"; else if (/후/.test(v)) roles[ev] = "후보";
+      });
+      if (col.list >= 0) {
+        const raw = headIdx > -1 ? String(r[col.list] ?? "") : r.slice(3, col.note >= 0 ? col.note : undefined).join(",");
+        raw.split(/[,\/·]/).map(s => s.trim()).filter(Boolean).forEach(tok => {
+          const m = tok.match(/^(.*?)\s*\((주장|후보)\)$/);
+          const ev = canonicalEventName(m ? m[1].trim() : tok, grade);
+          if (!events.includes(ev)) events.push(ev);
+          if (m) roles[ev] = m[2];
+        });
+      }
+      const noteTxt = col.note >= 0 ? String(r[col.note] ?? "") : "";
+      const patient = (col.patient >= 0 && r[col.patient] && !NO_MARK.test(r[col.patient])) || /환자/.test(noteTxt);
+
+      out.students.push({ cls, name, no: col.no >= 0 ? String(r[col.no] ?? "").trim() : "", events, roles, patient: !!patient });
+    });
+    return out;
+  }
+
+  function sortStudents(list) {
+    return list.sort((a, b) => (parseInt(a.cls) || 0) - (parseInt(b.cls) || 0) || (parseInt(a.no) || 0) - (parseInt(b.no) || 0));
+  }
+
+  function parseRosterText(text) {
+    const grade = document.getElementById("rosterGradeSelect")?.value || currentGrade;
+    const defaultCls = document.getElementById("rosterDefaultCls")?.value || "";
+    const r = rowsToStudents(text.split(/\r?\n/).map(splitLine), { grade, defaultCls, label: "붙여넣은 표" });
+    sortStudents(r.students);
+    return r;
+  }
+
+  // 업로드 전 검토용 표준 목록 텍스트 (반 | 번호 | 이름 | 출전종목 | 비고)
+  function toListText(students) {
+    return "반\t번호\t이름\t출전종목\t비고\n" + students.map(s => [
+      s.cls, s.no, s.name,
+      s.events.map(e => s.roles?.[e] ? `${e}(${s.roles[e]})` : e).join("/"),
+      s.patient ? "환자" : ""
+    ].join("\t")).join("\n");
+  }
+
+  // ===================== 출전선수명단 양식 (현재 대회 설정 기준으로 생성) =====================
+  function downloadTemplate() {
+    if (typeof XLSX === "undefined") { alert("엑셀 도구를 불러오지 못했습니다. 인터넷 연결을 확인하세요."); return; }
+    const g = document.getElementById("rosterGradeSelect").value;
+    const gCfg = masterConfig.grades[g]; if (!gCfg) return;
+    const evts = gCfg.events.filter(e => ruleOfEvt(e).listed);
+    const groups = {};
+    evts.forEach(e => { const r = ruleOfEvt(e); if (r.group) (groups[r.group] = groups[r.group] || []).push(e.name); });
+    const wb = XLSX.utils.book_new();
+    gCfg.teams.forEach(team => {
+      const num = (team.match(/\d+/) || [""])[0];
+      const head = ["번", "성명", ...evts.map(e => { const q = ruleOfEvt(e).quota; return q ? `${e.name}\n(${q})` : e.name; }), "환자"];
+      const aoa = [
+        [`${g}학년 출전선수명단`],
+        ["", "", ...Array(Math.max(head.length - 4, 0)).fill(""), "담임 :", "(인)"],
+        [num ? `${g}학년 ( ${num} )반` : `${g}학년 ${team}`],
+        head,
+        ...Array.from({ length: 32 }, (_, i) => [i + 1]),
+        [],
+        ["※ 종목 칸에 O 표시 (주장은 '주장', 후보는 '후보'라고 써도 됨). 환자 칸은 O 표시."],
+        ...Object.entries(groups).filter(([, a]) => a.length > 1).map(([k, a]) => [`※ 중복 출전 불가(${k}): ${a.join(", ")}`])
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = [{ wch: 5 }, { wch: 12 }, ...evts.map(() => ({ wch: 10 })), { wch: 7 }];
+      XLSX.utils.book_append_sheet(wb, ws, team.slice(0, 31));
+    });
+    XLSX.writeFile(wb, `${g}학년_출전선수명단_양식.xlsx`);
+  }
+
+  // ===================== 명단 검증 (부정 선수 사전 차단) =====================
+  function validateClass(students, grade = currentGrade) {
+    const issues = [];   // {level:'err'|'warn'|'info', evts, msg}
+    students.forEach(s => {
+      const byGroup = {};
+      s.events.forEach(e => { const g = ruleOfName(e, grade).group; if (g) (byGroup[g] = byGroup[g] || []).push(e); });
+      Object.values(byGroup).forEach(hit => {
+        if (hit.length > 1) issues.push({ level: "err", evts: hit, msg: `중복 출전: ${s.no}.${s.name} (${hit.join("·")})` });
+      });
+      if (s.patient && s.events.length) issues.push({ level: "warn", evts: s.events, msg: `환자인데 종목 표시: ${s.no}.${s.name}` });
+    });
+    const byEvt = {};
+    students.filter(s => !s.patient).forEach(s => s.events.forEach(e => (byEvt[e] = byEvt[e] || []).push(s)));
+    Object.entries(byEvt).forEach(([e, arr]) => {
+      const q = ruleOfName(e, grade).quota;
+      if (q && arr.length > q) issues.push({ level: "err", evts: [e], msg: `${e} 정원 초과 ${arr.length}/${q}명` });
+      else if (q && arr.length < q) issues.push({ level: "warn", evts: [e], msg: `${e} 인원 부족 ${arr.length}/${q}명` });
+      const caps = arr.filter(s => s.roles?.[e] === "주장");
+      if (caps.length > 1) issues.push({ level: "warn", evts: [e], msg: `${e} 주장 ${caps.length}명` });
+    });
+    const none = students.filter(s => !s.patient && !s.events.length);
+    if (none.length) issues.push({ level: "info", evts: [], msg: `종목 미표시 ${none.length}명 (줄다리기만 출전 등): ${none.map(s => s.name).join(", ")}` });
+    return issues;
+  }
+
+  // ===================== 명단 업로드 모달 =====================
+  function openRosterModal() {
+    if (!isAdmin) return;
+    document.getElementById("rosterGradeSelect").value = currentGrade;
+    fillRosterEditor(currentGrade);
+    document.getElementById("rosterModal").style.display = "flex";
+  }
+  function closeRosterModal() {
+    closeModal("rosterModal");
+    document.getElementById("rosterText").value = "";
+    document.getElementById("rosterFileNotes").innerHTML = "";
+  }
+  function fillRosterEditor(grade) {
+    const sel = document.getElementById("rosterDefaultCls");
+    const teams = masterConfig.grades[grade]?.teams || [];
+    sel.innerHTML = `<option value="">자동 인식</option>` + teams.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+    const list = roster[grade] || [];
+    document.getElementById("rosterText").value = list.length ? toListText(list) : "";
+    document.getElementById("rosterFileNotes").innerHTML = "";
+    updateRosterPreview();
+  }
+
+  function updateRosterPreview() {
+    const g = document.getElementById("rosterGradeSelect").value;
+    const text = document.getElementById("rosterText").value;
+    const box = document.getElementById("rosterPreview");
+    if (!text.trim()) { box.innerHTML = `<div class="hint">현재 서버에 올라간 ${g}학년 명단 없음</div>`; return; }
+    const { students, skipped, notes } = parseRosterText(text);
+    const teams = masterConfig.grades[g]?.teams || [];
+    const evts = masterConfig.grades[g]?.events || [];
+    const classes = [...new Set([...teams, ...students.map(s => s.cls)])];
+    const unknownCls = classes.filter(c => !teams.includes(c));
+    const unknownEvt = [...new Set(students.flatMap(s => s.events))].filter(e => !evts.some(ev => matchesEvent(e, ev)));
+
+    let errCount = 0;
+    const rowsHtml = classes.map(c => {
+      const list = students.filter(s => s.cls === c);
+      if (!list.length) return `<tr><td>${escapeHtml(c)}</td><td>0</td><td class="hint" style="text-align:left;">명단 없음</td></tr>`;
+      const issues = validateClass(list, g);
+      errCount += issues.filter(i => i.level === "err").length;
+      const pat = list.filter(s => s.patient).length;
+      return `<tr><td><strong>${escapeHtml(c)}</strong></td><td>${list.length}${pat ? ` <span class="hint">(환자 ${pat})</span>` : ""}</td>
+        <td style="text-align:left;">${issues.length ? issues.map(i => `<div class="iss-${i.level}">${escapeHtml(i.msg)}</div>`).join("") : '<span class="iss-ok">✔ 이상 없음</span>'}</td></tr>`;
+    }).join("");
+
+    box.innerHTML =
+      `<div style="margin:6px 0;">인식된 학생 <strong>${students.length}명</strong>` +
+      (errCount ? ` · <span class="iss-err" style="display:inline;">규칙 위반 ${errCount}건</span>` : "") + `</div>` +
+      [...(notes || [])].map(n => `<div class="iss-warn">${escapeHtml(n)}</div>`).join("") +
+      (skipped ? `<div class="iss-err">반을 알 수 없어 제외된 학생 ${skipped}명 → 위 '반 지정'을 선택하세요</div>` : "") +
+      (unknownCls.length ? `<div class="iss-warn">대회 설정에 없는 반: ${escapeHtml(unknownCls.join(", "))}</div>` : "") +
+      (unknownEvt.length ? `<div class="iss-warn">대회 설정에 없는 종목: ${escapeHtml(unknownEvt.join(", "))} → ⚙️ 대회 설정에서 종목명을 맞춰주세요</div>` : "") +
+      `<table class="preview-table"><thead><tr><th style="width:60px;">반</th><th style="width:80px;">인원</th><th>검증 결과</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+  }
+
+  // 여러 파일 × 여러 시트 → 표준 목록으로 변환해 편집창에 채움
+  async function loadRosterFiles(input) {
+    const files = [...input.files]; if (!files.length) return;
+    const g = document.getElementById("rosterGradeSelect").value;
+    const defaultCls = document.getElementById("rosterDefaultCls").value;
+    const all = [], notes = [];
+    for (const file of files) {
+      try {
+        if (/\.xlsx?$/i.test(file.name)) {
+          if (typeof XLSX === "undefined") { notes.push(`❌ ${file.name}: 엑셀 읽기 도구를 불러오지 못함 (표를 복사해 붙여넣으세요)`); continue; }
+          const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
+          wb.SheetNames.forEach(sn => {
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "", raw: false });
+            const r = rowsToStudents(rows, { grade: g, sheetName: sn, fileName: file.name, defaultCls, label: `${file.name} [${sn}]` });
+            if (!r.students.length && !r.skipped) return;   // 빈 시트
+            all.push(...r.students); notes.push(...r.notes);
+            notes.push(`📄 ${file.name} [${sn}] → ${r.students.length}명` + (r.skipped ? ` · <b>반 인식 실패 ${r.skipped}명</b>` : ""));
+          });
+        } else {
+          let txt = await readTextSmart(file);
+          const r = rowsToStudents(txt.split(/\r?\n/).map(splitLine), { grade: g, fileName: file.name, defaultCls, label: file.name });
+          all.push(...r.students); notes.push(...r.notes);
+          notes.push(`📄 ${file.name} → ${r.students.length}명` + (r.skipped ? ` · <b>반 인식 실패 ${r.skipped}명</b>` : ""));
+        }
+      } catch (e) { notes.push(`❌ ${file.name}: ${e.message}`); }
+    }
+    document.getElementById("rosterFileNotes").innerHTML = notes.map(n => `<div>${n.startsWith("📄") || n.startsWith("❌") ? n : escapeHtml(n)}</div>`).join("");
+    document.getElementById("rosterText").value = toListText(sortStudents(all));
+    updateRosterPreview();
+    input.value = "";
+  }
+  function readTextSmart(file) {   // UTF-8 시도 → 한글 깨지면 EUC-KR(엑셀 CSV)
+    return new Promise(res => {
+      const r1 = new FileReader();
+      r1.onload = e => {
+        if (!String(e.target.result).includes("�")) return res(e.target.result);
+        const r2 = new FileReader(); r2.onload = e2 => res(e2.target.result); r2.readAsText(file, "EUC-KR");
+      };
+      r1.readAsText(file, "UTF-8");
+    });
+  }
+
+  function applyRoster() {
+    if (!isAdmin) return;
+    const g = document.getElementById("rosterGradeSelect").value;
+    const { students, skipped } = parseRosterText(document.getElementById("rosterText").value);
+    if (!students.length) { alert("인식된 학생이 없습니다. 형식을 확인하세요."); return; }
+    const errs = [...new Set(students.map(s => s.cls))].flatMap(c => validateClass(students.filter(s => s.cls === c), g).filter(i => i.level === "err"));
+    let msg = `${g}학년 ${students.length}명을 업로드합니다.\n기존 ${g}학년 명단은 교체됩니다.`;
+    if (skipped) msg += `\n\n⚠️ 반을 알 수 없는 ${skipped}명은 제외됩니다.`;
+    if (errs.length) msg += `\n\n⚠️ 규칙 위반 ${errs.length}건이 있습니다 (중복 출전/정원 초과).\n그대로 올리면 경기 화면에 경고로 표시됩니다.`;
+    if (!confirm(msg)) return;
+    const btn = document.getElementById("rosterSaveBtn"); btn.disabled = true;
+    db.collection("rosters").doc(`G${g}`).set({
+      students,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser?.email || ""
+    }).then(() => { alert(`${g}학년 명단 업로드 완료 (로그인한 심판 전원에게 즉시 반영)`); closeRosterModal(); })
+      .catch(onWriteError).finally(() => btn.disabled = false);
+  }
+
+  function clearGradeRoster() {
+    const g = document.getElementById("rosterGradeSelect").value;
+    if (!confirm(`${g}학년 명단과 인원 체크 기록을 서버에서 삭제할까요?`)) return;
+    Promise.all([db.collection("rosters").doc(`G${g}`).delete(), db.collection("attendance").doc(`G${g}`).delete()])
+      .then(() => { document.getElementById("rosterText").value = ""; updateRosterPreview(); })
+      .catch(onWriteError);
+  }
+
+  // ===================== ✅ 인원 체크 =====================
+  function currentEvt() {
+    const ev = masterConfig.grades[currentGrade]?.events || [];
+    return ev.find(e => e.id === currentEventId) || ev[0];
+  }
+  function attMap(evtId) { return ((attendance[currentGrade] || {})[evtId]) || {}; }
+
+  function saveAttendance(evtId, changes) {   // changes: { 학생키: true/false }
+    const g = currentGrade;
+    attendance[g] = attendance[g] || {};
+    attendance[g][evtId] = { ...(attendance[g][evtId] || {}), ...changes };
+    renderAttendance();
+    db.collection("attendance").doc(`G${g}`).set({ [evtId]: changes }, { merge: true }).catch(onWriteError);
+  }
+  function toggleAttend(key) {
+    const evt = currentEvt(); if (!isAdmin || !evt) return;
+    saveAttendance(evt.id, { [key]: !attMap(evt.id)[key] });
+  }
+  function setClassAttendance(val) {
+    const evt = currentEvt(); if (!isAdmin || !evt) return;
+    const rows = classPool(evt, attClass).list;
+    if (!rows.length) return;
+    if (!val && !confirm(`${attClass} 체크를 모두 해제할까요?`)) return;
+    const changes = {}; rows.forEach(s => changes[studentKey(s)] = val);
+    saveAttendance(evt.id, changes);
+  }
+  function selectAttClass(c) { attClass = c; renderAttendance(); }
+  function toggleEntrantFilter(chk) { attOnlyEntrants = chk; renderAttendance(); }
+
+  // 반별 체크 대상: 이 종목 출전자(없으면 줄다리기처럼 반 전체), 환자는 제외
+  function classPool(evt, cls) {
+    const all = (roster[currentGrade] || []).filter(s => s.cls === cls);
+    const healthy = all.filter(s => !s.patient);
+    const entrants = healthy.filter(s => s.events.some(e => matchesEvent(e, evt)));
+    let mode = "entrants", list = entrants;
+    if (!attOnlyEntrants) { mode = "all"; list = healthy; }
+    else if (!ruleOfEvt(evt).listed || !entrants.length) { mode = "whole"; list = healthy; }   // 출전 명단 미기록 종목(줄다리기 등)
+    const roleOrder = s => ({ "주장": 0, "후보": 2 }[s.roles?.[evt.name]] ?? 1);
+    list = [...list].sort((a, b) => roleOrder(a) - roleOrder(b) || (parseInt(a.no) || 0) - (parseInt(b.no) || 0));
+    return { list, mode, patients: all.filter(s => s.patient) };
+  }
+
+  function renderAttendance() {
+    const tabs = document.getElementById("attClassTabs"), area = document.getElementById("attArea");
+    if (!isAdmin) { tabs.innerHTML = ""; area.innerHTML = ""; return; }
+    const evt = currentEvt(); if (!evt) return;
+    document.getElementById("attTitle").innerText = `${currentGrade}학년 ${evt.name} 인원 체크`;
+
+    const roster_g = roster[currentGrade] || [];
+    if (!roster_g.length) {
+      tabs.innerHTML = "";
+      area.innerHTML = `<div class="hint">아직 ${currentGrade}학년 명단이 없습니다. 상단 <strong>👥 명단 업로드</strong>에서 올려주세요.</div>`;
+      return;
+    }
+    const att = attMap(evt.id);
+    const teams = masterConfig.grades[currentGrade]?.teams || [];
+    const classes = [...teams, ...new Set(roster_g.map(s => s.cls).filter(c => !teams.includes(c)))];
+    if (!classes.includes(attClass)) attClass = classes.find(c => roster_g.some(s => s.cls === c)) || classes[0];
+
+    tabs.innerHTML = classes.map(c => {
+      const { list } = classPool(evt, c);
+      const on = list.filter(s => att[studentKey(s)]).length;
+      const hasErr = validateClass(roster_g.filter(s => s.cls === c)).some(i => i.level === "err" && i.evts.some(e => matchesEvent(e, evt)));
+      const done = list.length > 0 && on === list.length;
+      return `<button class="${c === attClass ? 'active' : ''} ${done ? 'done' : ''}" data-cls="${escapeHtml(c)}" onclick="selectAttClass(this.dataset.cls)">${hasErr ? "⚠️" : ""}${escapeHtml(c)} ${on}/${list.length}</button>`;
+    }).join("");
+
+    const { list: rows, mode, patients } = classPool(evt, attClass);
+    const present = rows.filter(s => att[studentKey(s)]);
+    const missing = rows.filter(s => !att[studentKey(s)]);
+    const complete = rows.length > 0 && !missing.length;
+    const issues = validateClass(roster_g.filter(s => s.cls === attClass)).filter(i => i.level !== "info" && i.evts.some(e => matchesEvent(e, evt)));
+    const modeText = { entrants: "출전 신청 선수", all: "반 전체 (환자 제외)", whole: "출전 명단 미기록 종목 → 반 전체 표시" }[mode];
+
+    area.innerHTML = `
+      <div class="att-toolbar">
+        <div>
+          <span class="att-count ${complete ? 'complete' : ''}">${escapeHtml(attClass)} ${present.length} / ${rows.length}명 ${complete ? '✅ 완료' : ''}</span>
+          <span class="hint" style="margin-left:6px;">${modeText}</span>
+          ${mode !== "whole" ? `<label class="hint" style="margin-left:10px;"><input type="checkbox" ${attOnlyEntrants ? 'checked' : ''} onchange="toggleEntrantFilter(this.checked)"> 출전자만</label>` : ""}
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-ok" onclick="setClassAttendance(true)">전원 출석</button>
+          <button class="btn" onclick="setClassAttendance(false)">체크 해제</button>
+        </div>
+      </div>
+      ${issues.length ? `<div class="att-issues">${issues.map(i => `<div class="iss-${i.level}">${escapeHtml(i.msg)}</div>`).join("")}</div>` : ""}
+      ${rows.length ? `<div class="att-grid">${rows.map(s => {
+          const k = studentKey(s), role = s.roles?.[evt.name] || "";
+          return `<div class="att-btn ${att[k] ? 'on' : ''} ${role === '후보' ? 'sub' : ''}" data-key="${escapeHtml(k)}" onclick="toggleAttend(this.dataset.key)" title="${escapeHtml(s.events.join(', '))}">
+                    ${role ? `<span class="role-tag">${role === '주장' ? 'Ⓒ 주장' : '후보'}</span>` : ''}${escapeHtml(s.name)}<span class="no">${escapeHtml(s.no)}번</span></div>`;
+        }).join("")}</div>`
+        : `<div class="hint">${escapeHtml(attClass)} 명단이 없습니다.</div>`}
+      ${missing.length && present.length ? `<div class="att-missing"><strong>미확인 ${missing.length}명:</strong> ${missing.map(s => `${escapeHtml(s.no)}.${escapeHtml(s.name)}`).join(", ")}</div>` : ""}
+      ${patients.length ? `<div class="hint" style="margin-top:8px;">🩹 환자(체크 제외): ${patients.map(s => `${escapeHtml(s.no)}.${escapeHtml(s.name)}`).join(", ")}</div>` : ""}
+    `;
+  }
+
+  // ===================== 설정 편집기 =====================
+  let tempEditingGrade = 1;
+  function openConfigModal() {
+    if (!isAdmin) return;
+    tempEditingGrade = currentGrade;
+    document.getElementById("cfgGradeSelect").value = tempEditingGrade;
+    loadGradeConfigToEditor(tempEditingGrade);
+    document.getElementById("configModal").style.display = "flex";
+  }
+
+  function loadGradeConfigToEditor(grade) {
+    tempEditingGrade = Number(grade);
+    const gCfg = masterConfig.grades[tempEditingGrade] || { teams: [], events: [] };
+    document.getElementById("cfgTeamsInput").value = gCfg.teams.join(", ");
+    document.getElementById("cfgEventsContainer").innerHTML = gCfg.events.map((evt, idx) => `
+      <div class="config-event-box" id="cfg_box_${idx}">
+        <div class="config-row">
+          <label>종목명:</label>
+          <input type="text" class="cfg-evt-name" value="${evt.name}">
+          <label>유형:</label>
+          <select class="cfg-evt-type" onchange="toggleBracketConfig(${idx}, this.value)">
+            <option value="tournament" ${evt.type === 'tournament' ? 'selected' : ''}>10강 토너먼트</option>
+            <option value="jumprope" ${evt.type === 'jumprope' ? 'selected' : ''}>기록 측정 (단체줄넘기 등)</option>
+            <option value="race" ${evt.type === 'race' ? 'selected' : ''}>순위 선택 (계주/3인4각 등)</option>
+          </select>
+          <button class="btn btn-danger" style="padding:2px 6px; font-size:0.75rem;" onclick="removeEventFromConfig(${idx})">삭제</button>
+        </div>
+        <div class="config-row">
+          <label>1위 배점:</label><input type="number" class="cfg-pts-r1" style="width:60px;" value="${evt.pts.r1}">
+          <label>2위:</label><input type="number" class="cfg-pts-r2" style="width:60px;" value="${evt.pts.r2}">
+          <label>3위/4강:</label><input type="number" class="cfg-pts-r3" style="width:60px;" value="${evt.pts.r3}">
+          <label>5위/8강:</label><input type="number" class="cfg-pts-r5" style="width:60px;" value="${evt.pts.r5 || evt.pts.r4 || 0}">
+          <label>참가(등외):</label><input type="number" class="cfg-pts-etc" style="width:60px;" value="${evt.pts.etc}">
+        </div>
+        ${(() => { const r = ruleOfEvt(evt); return `
+        <div class="config-row" style="background:#eef2ff; padding:6px; border-radius:6px;">
+          <label>📋 출전명단 기록:</label><input type="checkbox" class="cfg-evt-listed" ${r.listed ? 'checked' : ''} title="끄면 줄다리기처럼 반 전체가 출전">
+          <label>정원(후보 포함):</label><input type="number" min="0" class="cfg-evt-quota" style="width:60px;" value="${r.quota || ''}" placeholder="제한X">
+          <label>중복금지 그룹:</label>
+          <select class="cfg-evt-group">${["", "A", "B", "C", "D", "E"].map(g => `<option value="${g}" ${r.group === g ? 'selected' : ''}>${g || '없음'}</option>`).join('')}</select>
+          <span class="hint">같은 그룹 종목끼리 1인 1종목</span>
+        </div>`; })()}
+        <div class="cfg-bracket-config" style="display:${evt.type === 'tournament' ? 'block' : 'none'}; border-top:1px dashed #cbd5e1; padding-top:8px; margin-top:6px;">
+          <div style="font-size:0.75rem; font-weight:bold; margin-bottom:4px;">대진표 팀 배치:</div>
+          <div class="config-row">
+            <label>1경기:</label><input type="text" class="cfg-b-m1-1" style="width:50px;" value="${evt.bracket?.m1[0] || '1반'}"> vs <input type="text" class="cfg-b-m1-2" style="width:50px;" value="${evt.bracket?.m1[1] || '2반'}">
+            <label style="margin-left:8px;">2경기:</label><input type="text" class="cfg-b-m2-1" style="width:50px;" value="${evt.bracket?.m2[0] || '3반'}"> vs <input type="text" class="cfg-b-m2-2" style="width:50px;" value="${evt.bracket?.m2[1] || '4반'}">
+          </div>
+          <div class="config-row">
+            <label>3경기:</label><input type="text" class="cfg-b-m3-1" style="width:50px;" value="${evt.bracket?.m3[0] || '5반'}"> vs <input type="text" class="cfg-b-m3-2" style="width:50px;" value="${evt.bracket?.m3[1] || '6반'}">
+            <label style="margin-left:8px;">4경기:</label><input type="text" class="cfg-b-m4-1" style="width:50px;" value="${evt.bracket?.m4[0] || '7반'}"> vs <input type="text" class="cfg-b-m4-2" style="width:50px;" value="${evt.bracket?.m4[1] || '8반'}">
+          </div>
+          <div class="config-row">
+            <label>8강 부전승1:</label><input type="text" class="cfg-b-b1" style="width:50px;" value="${evt.bracket?.b1 || '9반'}">
+            <label style="margin-left:8px;">8강 부전승2:</label><input type="text" class="cfg-b-b2" style="width:50px;" value="${evt.bracket?.b2 || '10반'}">
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function toggleBracketConfig(idx, typeVal) {
+    document.getElementById(`cfg_box_${idx}`).querySelector(".cfg-bracket-config").style.display = (typeVal === 'tournament') ? 'block' : 'none';
+  }
+  function addNewEventToConfig() {
+    masterConfig.grades[tempEditingGrade].events.push({
+      id: "evt_" + Date.now(), name: "새 종목", type: "tournament",
+      pts: { r1: 100, r2: 80, r3: 60, r5: 40, etc: 20 },
+      bracket: { m1: ["1반","2반"], m2: ["3반","4반"], m3: ["5반","6반"], m4: ["7반","8반"], b1: "9반", b2: "10반" }
+    });
+    loadGradeConfigToEditor(tempEditingGrade);
+  }
+  function removeEventFromConfig(idx) {
+    masterConfig.grades[tempEditingGrade].events.splice(idx, 1);
+    loadGradeConfigToEditor(tempEditingGrade);
+  }
+
+  function saveMasterConfigToServer() {
+    if (!isAdmin) return;
+    const gCfg = masterConfig.grades[tempEditingGrade];
+    gCfg.teams = document.getElementById("cfgTeamsInput").value.split(",").map(s => s.trim()).filter(s => s);
+    const newEvents = [];
+    document.querySelectorAll(".config-event-box").forEach((box, idx) => {
+      const q = sel => box.querySelector(sel).value;
+      const r5 = Number(q(".cfg-pts-r5")) || 0;
+      const evtObj = {
+        id: gCfg.events[idx]?.id || ("evt_" + Date.now() + "_" + idx),
+        name: q(".cfg-evt-name"), type: q(".cfg-evt-type"),
+        listed: box.querySelector(".cfg-evt-listed").checked,
+        quota: Math.max(0, parseInt(q(".cfg-evt-quota"), 10) || 0),
+        group: q(".cfg-evt-group"),
+        pts: { r1: Number(q(".cfg-pts-r1")) || 0, r2: Number(q(".cfg-pts-r2")) || 0, r3: Number(q(".cfg-pts-r3")) || 0, r5, r4: r5, etc: Number(q(".cfg-pts-etc")) || 0 }
+      };
+      if (evtObj.type === 'tournament') {
+        evtObj.bracket = {
+          m1: [q(".cfg-b-m1-1"), q(".cfg-b-m1-2")], m2: [q(".cfg-b-m2-1"), q(".cfg-b-m2-2")],
+          m3: [q(".cfg-b-m3-1"), q(".cfg-b-m3-2")], m4: [q(".cfg-b-m4-1"), q(".cfg-b-m4-2")],
+          b1: q(".cfg-b-b1"), b2: q(".cfg-b-b2")
+        };
+      }
+      newEvents.push(evtObj);
+    });
+    gCfg.events = newEvents;
+    db.collection("settings").doc("masterConfig").set(masterConfig).then(() => {
+      alert("대회 설정이 저장되어 전체 화면에 즉시 적용되었습니다!");
+      closeModal("configModal");
+      renderAll();
+    }).catch(onWriteError);
+  }
+
+  window.onload = function() {
+    initPublicSync();
+    if (new URLSearchParams(window.location.search).get("mode") === "admin" && !auth.currentUser) toggleAuth();
+  };
+</script>
+</body>
+</html>
