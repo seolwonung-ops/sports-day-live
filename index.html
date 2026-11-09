@@ -406,6 +406,8 @@
       currentUser = user;
       setAdminUI(true);
       subscribePrivate();
+      const cfgDoc = await db.collection("settings").doc("masterConfig").get();   // 첫 로그인 시 대회 설정 생성
+      if (!cfgDoc.exists) await db.collection("settings").doc("masterConfig").set(masterConfig);
     } catch (e) {
       if (e.code === 'permission-denied') alert(`${user.email} 계정은 심판 권한이 없습니다.\n관리 교사에게 등록을 요청하세요.`);
       else alert("서버 연결 오류: " + e.message);
